@@ -1,7 +1,7 @@
 # AGENTS.md — ADEGA SB
 
-> **Doc viva.** Criado em 2026-10-08 · Última atualização: **2026-10-09 14:50** (F3 PDV balcão + catálogo mínimo entregues em staging: migration `0003` aplicada, seed de 28 produtos, rota `/pdv`).
-> **Status:** Fase 0 CONCLUÍDA · Fase 1 **CONCLUÍDA EM STAGING E PRODUÇÃO** (`https://adega-sb.netlify.app`, branch `main`) · **F3 PDV + catálogo mínimo CONCLUÍDO EM STAGING** (produção pendente de merge) · próxima: fechar F1 §7.0 / catálogo profundo (`0004` livre).
+> **Doc viva.** Criado em 2026-10-08 · Última atualização: **2026-10-09 16:20** (F3 PDV + catálogo mínimo **em staging E produção**: `0003` nas duas bases, seed de demonstração nas duas, `/pdv` no ar, E2E funcional 27/27).
+> **Status:** Fase 0 CONCLUÍDA · Fase 1 **CONCLUÍDA EM STAGING E PRODUÇÃO** (`https://adega-sb.netlify.app`, branch `main`) · **F3 PDV + catálogo mínimo CONCLUÍDO EM STAGING E PRODUÇÃO** (release 09/10 15:52–15:54, ritual §6) · próxima: fechar F1 §7.0 / catálogo profundo (**`0004` livre**).
 > Leia também: `F:\Projetos\adega-sb-docs\HANDOFF-IA.md` (documento global de passagem). Toda decisão nova entra aqui **no mesmo commit** da mudança.
 
 ## Regra nº 1 — um passo por vez, com validação
@@ -88,8 +88,8 @@ Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch padrã
 
 ## Testes
 
-1. **E2E do produto** — `npm run e2e` (`e2e/run.cjs`): guarda o `.env.local`, faz build própria em `.next-e2e` **sem** ele, roda `e2e/acesso-gate.cjs` (sobe o app nas portas 3101/3102) e devolve o `.env.local` (também em Ctrl+C). Motivo: o Next embute `NEXT_PUBLIC_*` no build e o `next start` lê o `.env.local`; com ele, os testes de "sem configuração → 503" falhavam (7 FAIL em 09/10 00:48). **Hoje: 19/19** (máquina do Joaquim, 2026-10-09 00:57). Na CI (commit `8ac5738`): **17/17** (a versão com 19 entra no 2º commit).
-2. **pgTAP** — `0001_test.sql` (27) + `0002_test.sql` (14) = **41/41** em Postgres 18 local com permissões iguais às do staging (08/10). **Nas bases Supabase: não executado** (próximo passo do roteiro).
+1. **E2E do produto** — duas suítes. **Gates:** `npm run e2e` (`e2e/run.cjs`) — guarda o `.env.local`, faz build própria em `.next-e2e` **sem** ele, roda `e2e/acesso-gate.cjs` (portas 3101/3102) e devolve o `.env.local`. Sem banco: valida fail-closed (sem env → 503; sem sessão → `/login?next=`). **Hoje: 21/21** — roda na CI a cada push. **Funcional:** `npm run e2e:pdv` (`e2e/pdv-funcional.cjs`) — **só local** (precisa `.env.local` real + seed): cria o usuário `caixa.e2e@adega-sb.invalid` via service role, sobe o build em 3103 e exercita o PDV de verdade (leitor, multiplicador, mesma-linha, busca, desconto, estoque baixo, +18, recusa de estoque do servidor, venda real com baixa no banco, sangria acima do teto, fechamento "Caixa confere.", drawer mobile 390 px). **Hoje: 27/27** (máquina do Joaquim, 09/10 15:48). Comparação de dinheiro na suíte precisa de `.replace(/[\u00A0\u202F]/g,' ')` (pt-BR usa espaço inquebrável).
+2. **pgTAP** — `0001_test.sql` (27) + `0002_test.sql` (14) + `0003_test.sql` (18) = **59/59 nas DUAS bases** (staging e produção). Em produção roda sem senha via `node scripts/gate-pgtap.cjs supabase/tests/000X_test.sql supabase/tests/_gate_000X.sql` + `supabase db query --linked --file ...` (o gate derruba o comando se `num_failed() > 0`).
 3. **Protótipos** — `adega-sb-docs\referencia\qa\proto-adega.cjs`: **40/40** (2026-10-08 17:50 UTC).
 4. **Validação manual no staging (2026-10-08/09):** master criado e logado · troca de senha obrigatória (master e caixa) · usuário Caixa no local Loja criado pela tela · Caixa não vê "Usuários e acessos" · Caixa recebe **403** em `/admin/usuarios` (09/10 00:10) · área Protótipos lista 4 cards (09/10 01:02).
 
@@ -147,7 +147,9 @@ Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch padrã
 8. ~~Netlify~~ **RESOLVIDA 09/10:** hospedagem = Netlify (Vercel fora da stack). Pendente: branch deploy do `staging` com chaves de staging por contexto.
 9. **Referências não anexadas:** `QA-PROCEDIMENTO-TESTES.md`, `GOVERNANCA-IA-E-DESENVOLVIMENTO.md`.
 10. **Usuário de teste `CaixaTeste`** (`providercyber@gmail.com`) existe no staging — manter só no staging.
+11. **Rotação da `sb_secret_` do staging** (foi colada no chat em 09/10): o cliente gera nova chave no Supabase → Project Settings → API Keys → **Rotate**, salva o valor em `nova-secret-staging.txt` dentro de `F:\Projetos\adega-sb-staging`; a IA troca no `.env.local` e apaga o arquivo. **A chave antiga continua comprometida até lá.**
+12. **Catálogo de demonstração nas duas bases** (28 produtos, estoques fictícios, `motivo='carga inicial do catalogo de exemplo'`): substituir pelo catálogo real na fase 2 (0004) — apagar os de exemplo antes de importar.
 
 ---
 
-**Contadores vivos** (2026-10-09 14:50): migrations **3** (`0001`, `0002`, `0003`) — staging: **3 aplicadas** · produção: **`0001`+`0002` aplicadas** (`0003` pendente de merge) · tabelas: **14** (14 com RLS) · pgTAP **59/59** (`0001` 27 + `0002` 14 + `0003` 18) em local e staging (produção: 41/41) · E2E **21** checks · CI verde em `8ac5738`, `818ff3d`, `63cb16b` · rotas **13** + middleware · seed de staging: **28 produtos / 9 categorias / 1 caixa** · usuários: staging **2**, produção **1** (master) · protótipo **40/40** · especificação **137** regras / **32** tabelas.
+**Contadores vivos** (2026-10-09 16:20): migrations **3** (`0001`, `0002`, `0003`) — **aplicadas nas duas bases** (staging e produção) · tabelas: **14** (14 com RLS) · pgTAP **59/59** (`0001` 27 + `0002` 14 + `0003` 18) em local, staging e produção · E2E: gates **21** (CI) + funcional PDV **27** (`npm run e2e:pdv`, local) · CI verde em `8ac5738`, `818ff3d`, `63cb16b`, `429e598`, `a63100b`, `742f566` (staging **e** main), `3887390` · rotas **13** + middleware · seed de demonstração: **28 produtos / 9 categorias / 1 caixa** nas duas bases · usuários: staging **2**, produção **1** (master) · protótipo **40/40** · especificação **137** regras / **32** tabelas.
