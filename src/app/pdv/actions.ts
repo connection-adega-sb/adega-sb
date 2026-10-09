@@ -53,8 +53,7 @@ export async function buscarProdutos(termo: string, localId?: string): Promise<P
   const { data: prods } = await sb.from('produtos')
     .select('id, categoria_id').in('id', ids);
 
-  // código exato primeiro (PDV-02)
-  const ordem = exato ? 0 : 1;
+  // código exato primeiro (PDV-02), depois ordem alfabética
   return data
     .map((p) => ({
       id: p.id, codigo_barras: p.codigo_barras, nome: p.nome,
@@ -62,7 +61,11 @@ export async function buscarProdutos(termo: string, localId?: string): Promise<P
       estoque: saldo.get(p.id) ?? 0,
       categoria: nomeCat.get(prods?.find((x) => x.id === p.id)?.categoria_id ?? '') ?? null,
     }))
-    .sort((a, b) => (exato && a.codigo_barras === t ? -1 : 0) - (exato && b.codigo_barras === t ? -1 : 0) || ordem);
+    .sort((a, b) => {
+      const ax = exato && a.codigo_barras === t ? 0 : 1;
+      const bx = exato && b.codigo_barras === t ? 0 : 1;
+      return ax - bx || a.nome.localeCompare(b.nome);
+    });
 }
 
 // ---------------------------------------------------------------- caixas e sessão
@@ -79,8 +82,12 @@ export async function listarCaixas(): Promise<CaixaInfo[]> {
   const s = await exigirSessao(['master', 'gerente', 'caixa']);
   const sb = supabaseAdmin();
   let q = sb.from('caixas').select('id, nome, local_id, locais!inner(codigo)');
-  // caixa/gerente vê caixas dos seus locais; master vê todos
-  if (s.papel !== 'master' && s.locais.length) q = q.in('local_id', s.locais);
+  // caixa/gerente vê só caixas dos seus locais; master vê todos.
+  // Sem local vinculado → não vê caixa nenhum (antes viaja e abria caixa de qualquer local).
+  if (s.papel !== 'master') {
+    if (!s.locais.length) return [];
+    q = q.in('local_id', s.locais);
+  }
   const { data } = await q.eq('ativo', true).order('nome');
   return (data ?? []).map((c) => ({
     id: c.id, nome: c.nome, local_id: c.local_id,

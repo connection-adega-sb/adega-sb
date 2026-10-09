@@ -40,6 +40,16 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
   const [drawer, setDrawer] = useState(false);
   const [salvando, setSalvando] = useState(false);
 
+  // layout: comanda inline no desktop, drawer no mobile (uma única instância no DOM)
+  const [ehDesktop, setEhDesktop] = useState(true);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const h = () => setEhDesktop(mq.matches);
+    h();
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, []);
+
   const buscaRef = useRef<HTMLInputElement>(null);
   const debounce = useRef<ReturnType<typeof setTimeout>>(null);
 
@@ -54,6 +64,10 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
   }, []);
 
   useEffect(() => { setCarregando(true); recarregar(caixaId); }, [caixaId, recarregar]);
+  // refresh usado pelo painel de caixa — estável (useCallback) para não gerar loop de efeito
+  const aoAbrir = useCallback(() => { void recarregar(caixaId); }, [recarregar, caixaId]);
+
+  const localAtual = caixas.find((c) => c.id === caixaId)?.local_id;
 
   // ------------------------------------------------ busca com debounce (PDV-02)
   useEffect(() => {
@@ -61,11 +75,11 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
     if (termo.trim().length < 2) { setResultados([]); setDestaque(0); return; }
     setBuscando(true);
     debounce.current = setTimeout(async () => {
-      const r = await buscarProdutos(termo, aberto ? sessao?.sessaoId && caixas.find(c => c.id === caixaId)?.local_id : undefined);
+      const r = await buscarProdutos(termo, aberto ? localAtual : undefined);
       setResultados(r); setDestaque(0); setBuscando(false);
     }, 200);
     return () => { if (debounce.current) clearTimeout(debounce.current); };
-  }, [termo, aberto, caixaId, caixas, sessao?.sessaoId]);
+  }, [termo, aberto, localAtual]);
 
   // ------------------------------------------------ adicionar item (PDV-04/06/07)
   const adicionar = useCallback((p: ProdutoBusca, qtdExtra = 1) => {
@@ -98,7 +112,7 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
     const t = resto.trim();
     if (t.length < 1) return;
     // código exato → entra direto (PDV-03, comportamento do leitor)
-    const r = resultados.length && !parseMult(termo).resto.match(/^\d{6,}$/) ? resultados : await buscarProdutos(t, caixas.find(c => c.id === caixaId)?.local_id);
+    const r = resultados.length && !/^\d{6,}$/.test(t) ? resultados : await buscarProdutos(t, aberto ? localAtual : undefined);
     const exato = r.find((p) => p.codigo_barras === t);
     const alvo = exato ?? r[destaque];
     if (alvo) adicionar(alvo, qtd);
@@ -125,7 +139,8 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
       l.produto.id === id ? (l.qtd + delta < 1 ? [] : [{ ...l, qtd: l.qtd + delta }]) : [l]));
 
   const remover = (id: string) => setLinhas((prev) => prev.filter((l) => l.produto.id !== id));
-  const limpar = () => { setLinhas([]); setDesconto(0); setMaior18(false); setAviso(null); };
+  const limparItens = () => { setLinhas([]); setDesconto(0); setMaior18(false); };
+  const limpar = () => { limparItens(); setAviso(null); };
 
   const subtotal = linhas.reduce((s, l) => s + l.produto.preco_varejo * l.qtd, 0);
   const total = Math.max(0, subtotal - desconto);
@@ -147,8 +162,9 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
     });
     setSalvando(false);
     if (r.erro) { setAviso({ tipo: 'erro', texto: r.erro }); return; }
+    // zera a comanda SEM apagar o aviso de sucesso (FV-04) — ordem importava
+    limparItens();
     setAviso({ tipo: 'ok', texto: `Venda finalizada: ${brl(total)} no ${forma.toUpperCase()}` });
-    limpar(); setDrawer(false);
     await recarregar(caixaId);
     buscaRef.current?.focus();
   }
@@ -191,7 +207,7 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-6xl flex-col gap-4 p-4 lg:flex-row">
+      <div className="mx-auto flex max-w-6xl flex-col gap-4 p-4 pb-20 lg:flex-row lg:pb-4">
         {/* ------------------------------------------------ busca + resultados */}
         <section className="flex-1 space-y-4">
           <div className="rounded-card bg-white p-4">
@@ -259,9 +275,23 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
           </div>
         </section>
 
-        {/* ------------------------------------------------ comanda */}
-        <aside className="w-full shrink-0 lg:w-[360px] xl:w-[420px]" data-testid="pdv-comanda">
-          <div className="rounded-card bg-white p-4 flex flex-col">
+        {/* ------------------------------------------------ comanda: instância única;
+            desktop = coluna inline, mobile = drawer (mesmo nó, posição muda) */}
+        <aside
+          data-testid="pdv-comanda-area"
+          className={
+            ehDesktop
+              ? 'w-full shrink-0 lg:w-[360px] xl:w-[420px]'
+              : drawer
+                ? 'fixed right-0 top-0 z-50 h-full w-full max-w-md overflow-y-auto bg-fundo p-3'
+                : 'hidden'
+          }
+        >
+          {!ehDesktop && drawer && (
+            <button onClick={() => setDrawer(false)} data-testid="pdv-drawer-fechar"
+              className="mb-2 rounded-full bg-white px-3 py-1 text-sm font-bold">Fechar</button>
+          )}
+          <div className="rounded-card bg-white p-4 flex flex-col" data-testid="pdv-comanda">
             <div className="flex items-center justify-between">
               <h2 className="font-extrabold text-estrutura">Comanda ({linhas.length})</h2>
               <button onClick={limpar} disabled={!linhas.length} data-testid="pdv-limpar"
@@ -339,31 +369,27 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
         </aside>
       </div>
 
-      {/* ------------------------------------------------ barra mobile */}
-      <div className="fixed bottom-0 left-0 right-0 lg:hidden">
-        <button onClick={() => (aberto ? setDrawer(true) : setPainelAberto(true))} data-testid="pdv-barra-mobile"
-          className={`w-full px-4 py-3.5 font-extrabold text-white ${aberto ? 'bg-acao-600' : 'bg-estrutura'}`}>
-          {aberto ? `${linhas.length} itens · ${brl(total)} →` : 'Abrir caixa'}
-        </button>
-      </div>
-
-      {drawer && (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-estrutura/60" onClick={() => setDrawer(false)} />
-          <div className="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto bg-fundo p-3">
-            <button onClick={() => setDrawer(false)} className="mb-2 rounded-full bg-white px-3 py-1 text-sm font-bold">Fechar</button>
-            <div className="[&>aside]:w-full [&>aside>div]:rounded-card">{/* comanda repetida no drawer */}</div>
-          </div>
+      {!ehDesktop && (
+        <div className="fixed bottom-0 left-0 right-0 z-30">
+          <button onClick={() => (aberto ? setDrawer(true) : setPainelAberto(true))} data-testid="pdv-barra-mobile"
+            className={`w-full px-4 py-3.5 font-extrabold text-white ${aberto ? 'bg-acao-600' : 'bg-estrutura'}`}>
+            {aberto ? `${linhas.length} itens · ${brl(total)} →` : 'Abrir caixa'}
+          </button>
         </div>
+      )}
+
+      {drawer && !ehDesktop && (
+        <div className="fixed inset-0 z-40 bg-estrutura/60" data-testid="pdv-drawer-fundo"
+          onClick={() => setDrawer(false)} />
       )}
 
       {painelAberto && (
         <PainelCaixa
           caixa={caixas.find((c) => c.id === caixaId)!}
-          sessao={sessao} turno={turno} papel={papel}
+          sessao={sessao} turno={turno} papel={papel} nome={nome}
           aba={abaCaixa} setAba={setAbaCaixa}
           fechar={() => setPainelAberto(false)}
-          aoAbrir={() => recarregar(caixaId)}
+          aoAbrir={aoAbrir}
         />
       )}
     </div>
@@ -371,9 +397,9 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
 }
 
 // ================================================================= painel caixa (CX-01..10)
-function PainelCaixa({ caixa, sessao, turno, papel, aba, setAba, fechar, aoAbrir }: {
+function PainelCaixa({ caixa, sessao, turno, papel, nome, aba, setAba, fechar, aoAbrir }: {
   caixa: CaixaInfo; sessao: ResumoCaixa | null; turno: ResumoCaixa | null;
-  papel: Papel; aba: 'mov' | 'fechar'; setAba: (a: 'mov' | 'fechar') => void;
+  papel: Papel; nome: string; aba: 'mov' | 'fechar'; setAba: (a: 'mov' | 'fechar') => void;
   fechar: () => void; aoAbrir: () => void;
 }) {
   const aberto = !!sessao?.aberta;
@@ -381,7 +407,19 @@ function PainelCaixa({ caixa, sessao, turno, papel, aba, setAba, fechar, aoAbrir
   const [stMov, acaoMov, pendMov] = useActionState<EstadoCaixa, FormData>(lancarMovimento, {});
   const [stFech, acaoFech, pendFech] = useActionState<ResultadoFechamento, FormData>(fecharCaixa, {});
 
-  useEffect(() => { if (stAbrir.sessaoId) aoAbrir(); }, [stAbrir, aoAbrir]);
+  // refresh do pai só quando uma ação termina (identidade nova do estado) — nunca em loop:
+  // antes, aoAbrir era recriado a cada render e o efeito de stAbrir re-disparava sem parar
+  const stMovAnterior = useRef(stMov);
+  useEffect(() => {
+    if (stMov === stMovAnterior.current) return;
+    stMovAnterior.current = stMov;
+    if (!stMov.erro) aoAbrir();                       // movimento lançado → gaveta/lista atualizam
+  }, [stMov, aoAbrir]);
+  useEffect(() => { if (stAbrir.sessaoId) aoAbrir(); }, [stAbrir.sessaoId, aoAbrir]);
+
+  // caixa fechou → o pai recarrega (sessão vira null) e o resultado fica até "Concluir"
+  const difFech = typeof stFech.diferenca === 'number' && !stFech.erro ? stFech.diferenca : null;
+  useEffect(() => { if (difFech !== null) aoAbrir(); }, [difFech, aoAbrir]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" data-testid="pdv-painel">
@@ -392,7 +430,19 @@ function PainelCaixa({ caixa, sessao, turno, papel, aba, setAba, fechar, aoAbrir
           <button onClick={fechar} aria-label="Fechar painel" className="text-ink-soft">✕</button>
         </div>
 
-        {!aberto ? (
+        {difFech !== null ? (
+          <div className="space-y-4 text-center" data-testid="pdv-resultado">
+            <p className={`rounded-card px-4 py-4 text-lg font-extrabold ${Math.abs(difFech) < 0.005 ? 'bg-ok/10 text-ok' : difFech > 0 ? 'bg-acao-100 text-acao-700' : 'bg-bad/10 text-bad'}`}
+              data-testid="pdv-resultado-fechamento">
+              {Math.abs(difFech) < 0.005 ? 'Caixa confere.'
+                : difFech > 0 ? `Sobra de ${brl(difFech)}`
+                : `Falta de ${brl(Math.abs(difFech))}`}
+            </p>
+            <p className="text-sm text-ink-soft">Esperado {brl(stFech.esperado ?? 0)} · turno encerrado</p>
+            <button onClick={fechar} data-testid="pdv-resultado-ok"
+              className="w-full rounded-full bg-acao-600 px-5 py-3 font-extrabold text-white">Concluir</button>
+          </div>
+        ) : !aberto ? (
           <form action={acaoAbrir} className="space-y-3" data-testid="pdv-form-abrir" noValidate>
             {turno && (
               <div className="rounded-card bg-fundo p-3 text-sm">
@@ -410,7 +460,7 @@ function PainelCaixa({ caixa, sessao, turno, papel, aba, setAba, fechar, aoAbrir
             <p role="alert" className="min-h-5 text-sm font-bold text-bad">{stAbrir.erro}</p>
             <button disabled={pendAbrir} data-testid="pdv-abrir-submit"
               className="w-full rounded-full bg-acao-600 px-5 py-3 font-extrabold text-white disabled:opacity-50">
-              {pendAbrir ? 'Abrindo…' : `Abrir caixa como ${sessao?.operador || ''}`.trim() || 'Abrir caixa'}
+              {pendAbrir ? 'Abrindo…' : `Abrir caixa como ${nome}`}
             </button>
           </form>
         ) : (
@@ -473,13 +523,6 @@ function PainelCaixa({ caixa, sessao, turno, papel, aba, setAba, fechar, aoAbrir
                 <input name="valorContado" type="number" min={0} step="0.01" required placeholder="Dinheiro contado (R$)"
                   data-testid="pdv-valor-contado" className="w-full rounded-xl border-[1.5px] border-line-input px-3.5 py-2.5 focus:outline-none" />
                 <p role="alert" className="min-h-5 text-sm font-bold text-bad">{stFech.erro}</p>
-                {typeof stFech.diferenca === 'number' && !stFech.erro && (
-                  <p className="rounded-card bg-fundo px-3 py-2 text-sm font-bold" data-testid="pdv-resultado-fechamento">
-                    {Math.abs(stFech.diferenca) < 0.005 ? 'Caixa confere.'
-                      : stFech.diferenca > 0 ? `Sobra de ${brl(stFech.diferenca)}`
-                      : `Falta de ${brl(Math.abs(stFech.diferenca))}`}
-                  </p>
-                )}
                 <button disabled={pendFech} data-testid="pdv-fechar-submit"
                   className="w-full rounded-full bg-estrutura px-5 py-3 font-extrabold text-white disabled:opacity-50">
                   {pendFech ? 'Fechando…' : `Fechar caixa de ${sessao.operador}`}

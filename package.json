@@ -9,6 +9,7 @@
     "lint": "eslint",
     "type-check": "tsc --noEmit",
     "e2e": "node e2e/run.cjs",
+    "e2e:pdv": "node e2e/pdv-funcional.cjs",
     "master": "node --env-file=.env.local scripts/criar-master.mjs"
   },
   "dependencies": {
