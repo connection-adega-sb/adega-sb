@@ -1,7 +1,7 @@
 # AGENTS.md — ADEGA SB
 
-> **Doc viva.** Criado em 2026-10-08 · Última atualização: **2026-10-09 01:10** (Fase 1 no ar no staging e no GitHub; área Protótipos e E2E isolado prontos para o 2º commit; roteiro de produção definido).
-> **Status:** Fase 0 CONCLUÍDA · Fase 1 **CONCLUÍDA NO STAGING** (login real, papéis por local e 403 validados manualmente; CI verde no GitHub) · Produção **não iniciada** (roteiro em `adega-sb-docs\HANDOFF-IA.md` §6).
+> **Doc viva.** Criado em 2026-10-08 · Última atualização: **2026-10-09 03:40** (produção no ar no Netlify; master de produção criado; correção do PDV em /prototipos/pdv.html).
+> **Status:** Fase 0 CONCLUÍDA · Fase 1 **CONCLUÍDA EM STAGING E PRODUÇÃO** (`https://adega-sb.netlify.app`, branch `main`) · próximo módulo: F2 catálogo e estoque (`0003`).
 > Leia também: `F:\Projetos\adega-sb-docs\HANDOFF-IA.md` (documento global de passagem). Toda decisão nova entra aqui **no mesmo commit** da mudança.
 
 ## Regra nº 1 — um passo por vez, com validação
@@ -35,16 +35,17 @@ O desenvolvedor lendo isso tem TDAH. Formate TODAS as respostas para que um cér
 
 | Ambiente | Pasta local | Branch | Banco (Supabase) | Deploy |
 |---|---|---|---|---|
-| **Staging/dev** (onde se trabalha) | `F:\Projetos\adega-sb-staging` | `staging` | `connection-adega-sb-staging` · `rogkczrtcfxurmnjvlwk` | Vercel Preview (a configurar) |
-| Produção (só recebe merge) | `F:\Projetos\adega-sb` | `main` | `connection-adega-sb` · `nhnlbptzjjibtmsgvcaw` | Vercel Production em push de `main` (a configurar) |
+| **Staging/dev** (onde se trabalha) | `F:\Projetos\adega-sb-staging` | `staging` | `connection-adega-sb-staging` · `rogkczrtcfxurmnjvlwk` | local (`npm run dev`); branch deploy no Netlify a configurar |
+| Produção (só recebe merge) | `F:\Projetos\adega-sb` | `main` | `connection-adega-sb` · `nhnlbptzjjibtmsgvcaw` | **Netlify** `adega-sb` → `https://adega-sb.netlify.app` (deploy automático em push de `main`) |
 | Documentação | `F:\Projetos\adega-sb-docs` | fora do git | — | — |
 
-Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch `staging` com commit `8ac5738` (2026-10-09 00:36, 54 arquivos) · `main` **ainda não existe**.
+Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch padrão **`main`** (produção) · `staging` (trabalho). Em 2026-10-09 03:00 ambas em `818ff3d`.
 
 **Nunca** editar código em `F:\Projetos\adega-sb`. Produção só recebe `git merge origin/staging` depois de CI verde e migrations aplicadas nas duas bases.
 
 ## Contas e credenciais (sem valores)
 
+1. **Netlify:** time `connection-adega-sb`, projeto `adega-sb` (privado até o fechamento). Variáveis: `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (mesmo valor em todos os contextos — trocar por contexto ao ligar o branch deploy) · `SUPABASE_SECRET_KEY` **secret**, só no contexto Production (chave `netlifyproducao` do Supabase prod).
 1. **GitHub:** `gh` tem 2 contas: `nuvem-de-papel` (outro projeto) e **`connection-adega-sb`** (ativa desde 09/10 00:22). `gh auth setup-git` já rodado. Identidade git **local** do repo: `Joaquim Mário <joaquimmscoelhoam@gmail.com>`. Antes de `push`, `gh auth status` deve mostrar `connection-adega-sb` ativa (`gh auth switch` troca).
 2. **Supabase CLI:** `npx supabase@latest` (2.120.0), logado em 08/10; projeto vinculado (`link`) = **staging**. O `link` usou o login, sem pedir senha do banco.
 3. **Segredos:** só em `.env.local` (fora do git) e nos painéis. Nomes: `NEXT_PUBLIC_SUPABASE_URL` · `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` · `SUPABASE_SECRET_KEY` (começa com `sb_secret_`; só servidor) · `SUPABASE_DB_URL` (pgTAP via psql). Futuros: `RESEND_API_KEY`, `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`, `IFOOD_CLIENT_ID/SECRET`.
@@ -103,9 +104,18 @@ Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch `stagi
 7. **Pegadinha:** protótipos em `public/prototipos/` usam `X-Frame-Options: SAMEORIGIN` (o PDV abre o site num quadro); o resto do app usa `DENY` (`next.config.ts`).
 8. **Pegadinha (CI):** avisos de Node.js 20 nas actions e migração do `ubuntu-latest` para Ubuntu 26 em 19/10/2026 → atualizar para `actions/checkout@v5` e `actions/setup-node@v5`.
 
+## Produção (no ar desde 2026-10-09 03:30)
+
+1. **URL:** `https://adega-sb.netlify.app` (Netlify, deploy automático em push de `main`). Supabase prod: Site URL e Redirect `https://adega-sb.netlify.app/**`.
+2. **Banco:** `0001` + `0002` aplicadas (preflight OK, 3 locais, RLS 5/5, grants conferidos, pgTAP 41/41). Master `joaquimmscoelhoam@gmail.com` criado pela pasta de produção.
+3. **Ritual de release (staging → produção):** validar no staging (type-check, lint, build, e2e) → commit/push `staging` → CI verde → migrations novas em produção (preflight → `link` prod → `db push` → pgTAP → **`link` de volta ao staging**) → na pasta de produção: `git fetch; git merge --ff-only origin/staging; git push origin main` → Netlify publica → smoke test.
+4. **Pegadinha (09/10):** a secret de produção apareceu num print com o "olho" aberto → **rotacionada** (nova `netlifyproducao`, antiga apagada). Regra: nunca clicar no olho de secret; copiar pelo botão.
+5. **Pegadinha (09/10):** o Netlify serve arquivo estático antes da rota do Next — `public/prototipos/index.html` respondia em `/prototipos/`. Nunca criar `index.html` dentro de `public/<rota-do-app>/`.
+6. **Pegadinha:** projeto Netlify "Private" exige login no Netlify (janela anônima vê "This site is private").
+
 ## Referência funcional (2026-10-07) — "o que já tínhamos"
 
-1. Protótipos HTML: PDV (com site e app do cliente), Site, Vendas, Compras — em `adega-sb-docs\referencia\prototipos\` e dentro do app em `/prototipos` (só master/gerente). Dados **só no navegador**.
+1. Protótipos HTML: PDV (`pdv.html`, com site e app do cliente), Site, Vendas, Compras — em `adega-sb-docs\referencia\prototipos\` e dentro do app em `/prototipos` (só master/gerente). Dados **só no navegador**.
 2. Especificação: `modulo-pdv.md` (53 regras), `modulo-vendas.md` (55), `modulo-compras.md` (29) = **137 regras**, **32 tabelas desenhadas**.
 3. Cada protótipo vira módulo real: estoque F2 · PDV F3 · bar F4 · delivery/site F5 · plataformas F6 · distribuidora F7 · compras F8.
 4. Pegadinha: no produto, todo valor é recalculado no servidor (nunca total vindo do navegador).
@@ -129,15 +139,15 @@ Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch `stagi
 
 1. **Enquadramento e CNAE** (cliente + contador): MEI × ME; sem CNAE de bar, atacado e transporte. Bloqueia o fiscal.
 2. **Endereço** (cliente): CNPJ no Montanhão × operação no Jardim Silvinia; IE a informar; confirmar grafia "Silvinia" × "Silvina".
-3. **Produção** (dev + cliente): roteiro em `HANDOFF-IA.md` §6 — nada aplicado ainda.
-4. **pgTAP nas bases Supabase** (dev).
-5. **Validar o site dentro do PDV na área Protótipos** (passo 16 ficou pela metade em 09/10 01:02).
+3. ~~Produção~~ **RESOLVIDA 09/10** (roteiro de 24 passos executado; ver seção Produção).
+4. ~~pgTAP nas bases~~ **RESOLVIDA 09/10:** 41/41 em staging e em produção.
+5. **PDV em /prototipos no Netlify:** o Netlify servia `public/prototipos/index.html` no lugar da página `/prototipos` → arquivo renomeado para `pdv.html` (commit de correção). Validar em produção após o merge.
 6. **Símbolo e favicons oficiais** (designer).
 7. **CI**: actions v5 (avisos de 09/10).
-8. **Netlify** (cliente): sem papel definido; app no Vercel.
+8. ~~Netlify~~ **RESOLVIDA 09/10:** hospedagem = Netlify (Vercel fora da stack). Pendente: branch deploy do `staging` com chaves de staging por contexto.
 9. **Referências não anexadas:** `QA-PROCEDIMENTO-TESTES.md`, `GOVERNANCA-IA-E-DESENVOLVIMENTO.md`.
 10. **Usuário de teste `CaixaTeste`** (`providercyber@gmail.com`) existe no staging — manter só no staging.
 
 ---
 
-**Contadores vivos** (2026-10-09 01:10): migrations **2** (`0001`, `0002`) — staging: **aplicadas** · produção: **0** · tabelas da 0001: **5** (5 com RLS) · pgTAP **2** suítes / **41** asserts (local) · E2E **1** suíte / **19** checks (local) · CI: **1** run verde (`37880010084`) · rotas **12** + middleware · usuários staging: **2** (master + caixa teste) · protótipo **40/40** · especificação **137** regras / **32** tabelas.
+**Contadores vivos** (2026-10-09 03:40): migrations **2** (`0001`, `0002`) — staging: **aplicadas** · produção: **aplicadas** · tabelas: **5** (5 com RLS) · pgTAP **41/41** em local, staging e produção · E2E **19** checks · CI verde em `8ac5738` e `818ff3d` · rotas **12** + middleware · usuários: staging **2**, produção **1** (master) · protótipo **40/40** · especificação **137** regras / **32** tabelas.

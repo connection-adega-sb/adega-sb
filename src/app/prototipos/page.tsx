@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 // Protótipos HTML de 07/10/2026 (public/prototipos). Referência funcional: guardam dados SÓ no navegador,
 // sem banco e sem login próprio. Cada um vira módulo real conforme o roadmap.
 const ITENS = [
-  { href: '/prototipos/index.html', nome: 'PDV balcão', fase: 'vira F3', desc: 'Caixa, leitor, +18, F9 (Balcão · Delivery · App), romaneio, precificação do copão e site da loja dentro do PDV.' },
+  { href: '/prototipos/pdv.html', nome: 'PDV balcão', fase: 'vira F3', desc: 'Caixa, leitor, +18, F9 (Balcão · Delivery · App), romaneio, precificação do copão e site da loja dentro do PDV.' },
   { href: '/prototipos/site.html', nome: 'Site da loja', fase: 'vira F5', desc: 'Catálogo com fotos, calculadora da festa, checkout e acompanhamento do pedido. Pedido feito aqui aparece no PDV (F9 › App) deste navegador.' },
   { href: '/prototipos/vendas.html', nome: 'Vendas', fase: 'vira F7', desc: 'Pedidos, varejo e atacado, notas, entregas e transportadoras, devoluções.' },
   { href: '/prototipos/compras.html', nome: 'Compras', fase: 'vira F8', desc: 'Pedidos a fornecedor, importação, recebimento e notas de entrada.' },

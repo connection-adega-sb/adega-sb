@@ -306,7 +306,7 @@
 </head>
 <body>
 <a class="pular" href="#conteudo">Pular para o conteúdo</a>
-<div class="previa" id="previa" hidden><strong>Prévia.</strong> Pedidos feitos aqui chegam no PDV da ADEGA SB (F9 › App), aberto neste mesmo navegador.<a href="index.html" data-pdv>Abrir o PDV</a></div>
+<div class="previa" id="previa" hidden><strong>Prévia.</strong> Pedidos feitos aqui chegam no PDV da ADEGA SB (F9 › App), aberto neste mesmo navegador.<a href="pdv.html" data-pdv>Abrir o PDV</a></div>
 
 <header class="topo">
   <div class="wrap">
@@ -742,7 +742,7 @@ function renderAcomp() {
   $('#telaAcomp').innerHTML = `<div class="status"><p class="olho">Pedido ${esc(pedidoAtual.numero)}</p><h3>${esc(titulo)}</h3>
       <p class="ajuda">${brl(pedidoAtual.total)} · ${pedidoAtual.pago ? 'pago no PIX' : 'pagar na entrega (' + FORMA[pedidoAtual.pagamento] + ')'}${st.entregador && st.status === 'rota' ? ' · com ' + esc(st.entregador) : ''}</p>
       <ol>${passos.map(([k, l], i) => `<li class="${i <= idx && !ruim ? 'feito' : ''}"><span class="bola">${i <= idx && !ruim ? '✓' : i + 1}</span>${esc(l)}</li>`).join('')}</ol></div>
-    ${LOJA.previa ? `<p class="dica">Prévia: este pedido já está no PDV da ${esc(LOJA.marca)} em <strong>F9 › App</strong> (no mesmo navegador). Mova o pedido lá e veja o status mudar aqui. <a href="index.html" data-pdv>${DENTRO_DO_PDV ? 'Ver no PDV (F9)' : 'Abrir o PDV'}</a></p>` : ''}
+    ${LOJA.previa ? `<p class="dica">Prévia: este pedido já está no PDV da ${esc(LOJA.marca)} em <strong>F9 › App</strong> (no mesmo navegador). Mova o pedido lá e veja o status mudar aqui. <a href="pdv.html" data-pdv>${DENTRO_DO_PDV ? 'Ver no PDV (F9)' : 'Abrir o PDV'}</a></p>` : ''}
     ${pedidoAtual.enviadoErp ? '' : '<p class="erro">Não foi possível registrar o pedido neste navegador. Use o WhatsApp.</p>'}
     ${wa ? `<a class="btn btn-whats" href="${wa}" target="_blank" rel="noopener">Falar sobre o pedido no WhatsApp</a>` : ''}
     <button class="btn btn-linha" type="button" id="novoPedido">Fazer outro pedido</button>`;
