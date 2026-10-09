@@ -8,7 +8,7 @@ Regras de trabalho: **AGENTS.md** (leia antes de qualquer mudança). Documentaç
 ```powershell
 cd F:\Projetos\adega-sb-staging
 npm ci
-Copy-Item .env.example .env.local   # preencher com as chaves do Supabase STAGING
+Copy-Item .env.example .env.local   # chaves do STAGING; secret começa com sb_secret_ (não é o JWT Secret)
 npm run dev                          # http://localhost:3000
 ```
 
@@ -25,9 +25,9 @@ npm run type-check; npm run lint; npm run build; npm run e2e
 
 | Pasta | Conteúdo |
 |---|---|
-| `supabase/migrations/` | `0001_acesso.sql` (tenants, locais, profiles, profile_locais, audit_log) |
+| `supabase/migrations/` | `0001_acesso.sql` (tenants, locais, profiles, profile_locais, audit_log) · `0002_permissoes_data_api.sql` (grants explícitos) |
 | `supabase/preflight/` | roda antes da migration; recusa se as tabelas já existirem |
-| `supabase/tests/` | pgTAP (`0001_test.sql`: 27 asserts) |
+| `supabase/tests/` | pgTAP (`0001_test.sql`: 27 · `0002_test.sql`: 14) |
 | `supabase/rollback/` | desfaz enquanto não houver perfis |
 
 Ritual por migration (staging primeiro, produção antes do merge): preflight → migration → pgTAP. Passo a passo no AGENTS.md.
@@ -36,7 +36,17 @@ Ritual por migration (staging primeiro, produção antes do merge): preflight �
 
 ```powershell
 cd F:\Projetos\adega-sb-staging
-npm run master -- seu-email@dominio "Seu Nome"
+node --env-file=.env.local scripts/criar-master.mjs seu-email@dominio "Seu Nome"
 ```
 
+(No PowerShell, `npm run master -- ... "Nome Composto"` perde as aspas — use o `node` direto.)
+
 A senha inicial aparece uma única vez. Entre em `/login`, troque a senha e crie a equipe em `/admin/usuarios`.
+
+## Protótipos (referência funcional)
+
+`/prototipos` (master/gerente): PDV com site, Site, Vendas, Compras — arquivos em `public/prototipos/`, dados só no navegador.
+
+## Produção
+
+Nunca editar código fora do staging. Roteiro único: `F:\Projetos\adega-sb-docs\HANDOFF-IA.md` §6.

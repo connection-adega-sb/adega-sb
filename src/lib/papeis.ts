@@ -10,6 +10,7 @@ export const ROTULO_PAPEL: Record<Papel, string> = {
 // Prefixo de rota → papéis com acesso. Rota protegida que não está aqui: qualquer papel ativo.
 export const ACESSO_ROTA: { prefixo: string; papeis: readonly Papel[] }[] = [
   { prefixo: '/admin', papeis: ['master'] },
+  { prefixo: '/prototipos', papeis: ['master', 'gerente'] },   // protótipos HTML de referência (public/prototipos)
 ];
 
 export const ROTAS_PUBLICAS = ['/login', '/sem-acesso', '/indisponivel', '/api/health'];

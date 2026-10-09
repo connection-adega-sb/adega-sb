@@ -40,6 +40,13 @@ export default async function Painel() {
               <p className="text-sm text-ink-soft mt-1">Criar equipe, papel e locais de cada pessoa.</p>
             </Link>
           )}
+          {(s.papel === 'master' || s.papel === 'gerente') && (
+            <Link href="/prototipos" data-testid="card-prototipos" className="rounded-card border border-line bg-white p-5 hover:shadow-lg transition-shadow">
+              <p className="text-xs font-extrabold uppercase tracking-widest text-acao-600">Referência · protótipos</p>
+              <h2 className="text-xl font-bold text-estrutura mt-1">Protótipos</h2>
+              <p className="text-sm text-ink-soft mt-1">PDV, site, Vendas e Compras como aprovados (dados só no navegador).</p>
+            </Link>
+          )}
           {MODULOS.map((m) => (
             <div key={m.nome} className="rounded-card border border-dashed border-line bg-white/60 p-5" aria-disabled="true">
               <p className="text-xs font-extrabold uppercase tracking-widest text-ink-soft">{m.fase} · em construção</p>

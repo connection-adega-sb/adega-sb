@@ -1,184 +1,143 @@
-# AGENTS.md — Adega SB
+# AGENTS.md — ADEGA SB
 
-> **Doc viva.** Criado em 2026-10-08 · Última atualização: 2026-10-08 15:00 (Fase 1 codificada e validada localmente; kit oficial de identidade aplicado).
-> **Status:** Fase 0 CONCLUÍDA · Fase 1 **PARCIAL** — código em `F:\Projetos\adega-sb-staging` validado local (type-check, lint, build 11 rotas, E2E 17/17, pgTAP 27/27 em Postgres local); **falta**: primeiro push, migration 0001 nas 2 bases Supabase, deploy Vercel.
-> Toda decisão nova de ambiente, fluxo, arquitetura ou convenção entra aqui **no mesmo commit** da mudança.
+> **Doc viva.** Criado em 2026-10-08 · Última atualização: **2026-10-09 01:10** (Fase 1 no ar no staging e no GitHub; área Protótipos e E2E isolado prontos para o 2º commit; roteiro de produção definido).
+> **Status:** Fase 0 CONCLUÍDA · Fase 1 **CONCLUÍDA NO STAGING** (login real, papéis por local e 403 validados manualmente; CI verde no GitHub) · Produção **não iniciada** (roteiro em `adega-sb-docs\HANDOFF-IA.md` §6).
+> Leia também: `F:\Projetos\adega-sb-docs\HANDOFF-IA.md` (documento global de passagem). Toda decisão nova entra aqui **no mesmo commit** da mudança.
+
+## Regra nº 1 — um passo por vez, com validação
+
+Ao orientar o Joaquim: **uma ação por mensagem** (um bloco de comando, uma consulta SQL ou um clique), com o **resultado esperado**. Só avance depois de ver a saída/print e validar ("Passo N validado"). Se não bateu, corrija o mesmo passo. Nunca mande os comandos dos passos seguintes antes. Mostre "Passo N de M".
 
 ## Custom Instructions: ADHD-Friendly Output
 
 O desenvolvedor lendo isso tem TDAH. Formate TODAS as respostas para que um cérebro com TDAH possa agir imediatamente.
 
-**Regras Absolutas:**
-1. **Comece com a próxima ação:** A primeira linha DEVE ser um comando, caminho ou snippet de código. Zero preâmbulos.
-2. **Numere tarefas com múltiplas etapas:** Use listas numeradas curtas. Um passo = uma ação isolada. Máximo de 5 itens por lista.
-3. **Seja Direto:** Sem frases de cordialidade. Remova fechamentos vazios.
-4. **Estimativas Exatas:** Dê estimativas de tempo específicas (minutos).
-5. **Estado Visível:** Reafirme o progresso e externalize o estado a cada interação.
+1. **Comece com a próxima ação:** a primeira linha é um comando, caminho ou snippet. Zero preâmbulo.
+2. **Numere tarefas:** listas curtas, um passo = uma ação, máximo 5 itens.
+3. **Seja direto:** sem cordialidades nem fechamentos vazios.
+4. **Estimativas exatas:** tempo em minutos.
+5. **Estado visível:** reafirme o progresso a cada interação.
 
-## Empresa (fonte: comprovante CNPJ emitido em 07/10/2026 + declaração do cliente em 08/10/2026)
+## Empresa
 
 | Campo | Valor | Fonte |
 |---|---|---|
-| Nome empresarial | SIMONE ALVES NASCIMENTO 16167027889 | comprovante CNPJ |
-| Nome fantasia | **ADEGA SB** (caixa-alta, como no brandbook atualizado em 08/10/2026; no CNPJ: `********`) | brandbook / comprovante |
-| CNPJ | 43.466.024/0001-43 · aberto em 10/09/2021 · ATIVA | comprovante CNPJ |
-| Natureza / porte | 213-5 Empresário (Individual) · porte **ME** no comprovante · cliente declara **MEI** | comprovante × declaração — **divergência, ver Pendências** |
-| CNAE principal | 47.23-7-00 Comércio varejista de bebidas | comprovante |
-| CNAEs secundários | 47.89-0-99 · 47.21-1-03 · 47.29-6-01 (tabacaria) · 47.55-5-02 · 47.21-1-02 · 47.72-5-00 · 47.89-0-05 | comprovante |
-| Endereço declarado (08/10) | Rua Jerônimo de Ataíde, 10 · Jardim Silvinia · São Bernardo do Campo/SP · CEP 09791-290 | cliente |
-| Endereço no CNPJ (07/10) | Estr. do Montanhão, 91134 · Montanhão · CEP 09791-250 | comprovante — **divergente** |
-| Contato no CNPJ | (11) 4109-1988 · e-mail do comprovante | comprovante |
-| WhatsApp da loja | (11) 98197-0910 | cliente (07/10) |
-| Capital social | R$ 10.000,00 · QSA não se aplica à natureza jurídica | consulta QSA |
+| Nome empresarial | SIMONE ALVES NASCIMENTO 16167027889 | comprovante CNPJ (07/10/2026) |
+| Nome fantasia | **ADEGA SB** (caixa-alta, brandbook de 08/10) | brandbook |
+| CNPJ | 43.466.024/0001-43 · ATIVA desde 10/09/2021 | comprovante |
+| Natureza / porte | Empresário Individual · porte **ME** no comprovante · cliente declara **MEI** | **divergência — pendência 1** |
+| CNAEs | 47.23-7-00 (principal, bebidas) + 47.89-0-99 · 47.21-1-03 · 47.29-6-01 (tabacaria) · 47.55-5-02 · 47.21-1-02 · 47.72-5-00 · 47.89-0-05 | comprovante |
+| Endereço declarado | R. Jerônimo de Ataíde, 10 · Jardim Silvinia · São Bernardo do Campo/SP · CEP 09791-290 | cliente (08/10) |
+| Endereço no CNPJ | Estr. do Montanhão, 91134 · CEP 09791-250 | **divergente — pendência 2** |
+| Telefones | (11) 4109-1988 (CNPJ) · WhatsApp (11) 98197-0910 | comprovante / cliente |
 
 ## Ambientes — dev/staging vs produção
 
-| Ambiente | Pasta local | Branch git | Banco/Backend | Deploy |
+| Ambiente | Pasta local | Branch | Banco (Supabase) | Deploy |
 |---|---|---|---|---|
-| Produção | `F:\Projetos\adega-sb` | `main` | Supabase `connection-adega-sb` · ref `nhnlbptzjjibtmsgvcaw` | Vercel — dispara em push/merge em `main` |
-| Staging/dev | `F:\Projetos\adega-sb-staging` | `staging` (ou qualquer branch != `main`) | Supabase `connection-adega-sb-staging` · ref `rogkczrtcfxurmnjvlwk` | Vercel Preview — push de branch != `main` |
-| Documentação | `F:\Projetos\adega-sb-docs` | — (fora do repo de código) | — | — |
+| **Staging/dev** (onde se trabalha) | `F:\Projetos\adega-sb-staging` | `staging` | `connection-adega-sb-staging` · `rogkczrtcfxurmnjvlwk` | Vercel Preview (a configurar) |
+| Produção (só recebe merge) | `F:\Projetos\adega-sb` | `main` | `connection-adega-sb` · `nhnlbptzjjibtmsgvcaw` | Vercel Production em push de `main` (a configurar) |
+| Documentação | `F:\Projetos\adega-sb-docs` | fora do git | — | — |
 
-Repositório único: `https://github.com/connection-adega-sb/adega-sb` (`.git`).
-**Estado em 2026-10-08 16:53 UTC:** `git ls-remote origin` → **0 refs** (sem commit). Em 2026-10-08 15:00 BRT o código da Fase 1 está pronto para o **primeiro push** na branch `staging` (passo a passo em "Primeiro push").
+Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch `staging` com commit `8ac5738` (2026-10-09 00:36, 54 arquivos) · `main` **ainda não existe**.
 
-Stack declarada: GitHub · Supabase (PostgreSQL + Auth + RLS) · Vercel · Next.js + TypeScript (+ JavaScript) · Python (scripts/gerador) · Docker (Supabase local) · ngrok (webhooks em dev) · Mercado Pago (PIX/cartão) · Resend (e-mail) · Netlify (**papel a decidir** — ver Pendências; deploy oficial do app é Vercel).
+**Nunca** editar código em `F:\Projetos\adega-sb`. Produção só recebe `git merge origin/staging` depois de CI verde e migrations aplicadas nas duas bases.
 
-Segredos: **só em env** (`.env.local` fora do git + painel Vercel/Supabase). Nunca em `.md`, nunca em commit. Nomes padrão:
-`NEXT_PUBLIC_SUPABASE_URL` · `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` · `SUPABASE_SECRET_KEY` (service role, só servidor) · `SUPABASE_DB_URL` · `RESEND_API_KEY` · `MP_ACCESS_TOKEN` · `MP_WEBHOOK_SECRET` · `IFOOD_CLIENT_ID` · `IFOOD_CLIENT_SECRET`.
-Tokens de GitHub, Resend, anon e service_role existem (referências truncadas recebidas em 08/10) — **não copiar valores para cá**.
+## Contas e credenciais (sem valores)
 
-Migrations: Supabase CLI. Vincular e aplicar por base:
+1. **GitHub:** `gh` tem 2 contas: `nuvem-de-papel` (outro projeto) e **`connection-adega-sb`** (ativa desde 09/10 00:22). `gh auth setup-git` já rodado. Identidade git **local** do repo: `Joaquim Mário <joaquimmscoelhoam@gmail.com>`. Antes de `push`, `gh auth status` deve mostrar `connection-adega-sb` ativa (`gh auth switch` troca).
+2. **Supabase CLI:** `npx supabase@latest` (2.120.0), logado em 08/10; projeto vinculado (`link`) = **staging**. O `link` usou o login, sem pedir senha do banco.
+3. **Segredos:** só em `.env.local` (fora do git) e nos painéis. Nomes: `NEXT_PUBLIC_SUPABASE_URL` · `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` · `SUPABASE_SECRET_KEY` (começa com `sb_secret_`; só servidor) · `SUPABASE_DB_URL` (pgTAP via psql). Futuros: `RESEND_API_KEY`, `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`, `IFOOD_CLIENT_ID/SECRET`.
+4. **Pegadinha (08/10):** colaram o **JWT Secret** (começava com `-GrYw_`) no lugar da Secret key → `Invalid API key`. A chave certa fica em Project Settings → **API Keys → Secret keys** e começa com `sb_secret_`. O comando de gravação do `.env.local` (HANDOFF §5) recusa outra coisa.
 
-```powershell
-cd F:\Projetos\adega-sb-staging
-supabase link --project-ref rogkczrtcfxurmnjvlwk   # staging
-supabase db push
-```
+## Fluxo obrigatório (código e banco)
 
-Antes de criar a próxima migration, **conferir a numeração real** em `supabase/migrations/` (em 2026-10-08 16:55: `0001_acesso.sql` e `0002_permissoes_data_api.sql`; próxima livre **`0003`**, reservada ao PRD de catálogo e estoque).
-
-## Primeiro push (uma vez só)
-
-```powershell
-cd F:\Projetos\adega-sb-staging
-git init -b staging
-git remote add origin https://github.com/connection-adega-sb/adega-sb.git
-git add . ; git commit -m "Fase 1: fundação Next.js + acesso (migration 0001, login, middleware, E2E acesso-gate)"
-git push -u origin staging
-```
-
-Pasta de produção (depois que a 0001 estiver nas duas bases e a CI verde):
-
-```powershell
-cd F:\Projetos
-git clone https://github.com/connection-adega-sb/adega-sb.git adega-sb-tmp
-Move-Item adega-sb-tmp\.git F:\Projetos\adega-sb\.git ; Remove-Item adega-sb-tmp -Recurse -Force
-cd F:\Projetos\adega-sb ; git checkout -b main origin/staging ; git push -u origin main
-```
+1. Trabalhar em `F:\Projetos\adega-sb-staging`, branch `staging`.
+2. Validar: `npm run type-check` → `npm run lint` → `npm run build` → `npm run e2e`, com `npm run dev` **parado**.
+3. Commit + `git push` em `staging` → CI verde (`gh run watch <id> --exit-status`).
+4. Migration: staging primeiro (ritual abaixo); produção **antes** do merge que deploya.
+5. Merge em `main` (pasta de produção) é o **único** gatilho de produção.
 
 ## Ritual de migration (por migration, nas duas bases)
 
-Ferramentas: Supabase CLI via `npx supabase@latest` (não precisa instalar; pede a senha do banco) e o **SQL Editor** do painel.
+1. **Conferir numeração:** `Get-ChildItem supabase\migrations` → usar o próximo número livre. Hoje: `0001_acesso`, `0002_permissoes_data_api` → **próxima: `0003`** (PRD de catálogo e estoque).
+2. **Preflight:** SQL Editor do projeto → colar `supabase/preflight/NNNN_preflight.sql` → `preflight NNNN OK`.
+3. **Migration:** `npx supabase@latest link --project-ref <ref>` → `npx supabase@latest db push` → confirmar Yes. **Nunca** colar a migration no SQL Editor (o `db push` tentaria de novo). Se precisar: `npx supabase@latest migration repair --status applied NNNN`.
+4. **pgTAP:** `Get-Content supabase\tests\NNNN_test.sql -Raw | docker run --rm -i postgres:17 psql "<string do Session pooler>" -v ON_ERROR_STOP=1` (Docker aberto; use o **Session pooler**, a conexão Direct pode falhar no Windows). Gate: nenhum `not ok`. O SQL Editor mostra só o último resultado — não serve como gate.
+5. **Depois de produção:** voltar o vínculo para staging: `npx supabase@latest link --project-ref rogkczrtcfxurmnjvlwk`.
+6. **Toda migration termina com `grant` explícitos** (o projeto NÃO concede nada em tabela nova — ver Fase 1, item 6) e o pgTAP confere com `has_table_privilege`.
 
-1. **Staging — preflight:** SQL Editor do projeto `rogkczrtcfxurmnjvlwk` → colar `supabase/preflight/NNNN_preflight.sql` → resultado `preflight NNNN OK`.
-2. **Staging — migration:** `cd F:\Projetos\adega-sb-staging` → `npx supabase@latest link --project-ref rogkczrtcfxurmnjvlwk` → `npx supabase@latest db push` (registra em `supabase_migrations`; **nunca** aplicar a migration colando no SQL Editor, senão o `db push` tenta de novo).
-3. **Staging — pgTAP:** SQL Editor → colar `supabase/tests/NNNN_test.sql` → `finish()` **sem linhas** = todos passaram; qualquer linha "Looks like you failed" = parar.
-4. **Produção** (`nhnlbptzjjibtmsgvcaw`): repetir 1→3 com `link --project-ref nhnlbptzjjibtmsgvcaw` **antes** do merge em `main`.
-5. Com psql instalado, o pgTAP mostra cada assert: `psql "$env:SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/NNNN_test.sql`.
+## Regras permanentes de sessão
 
-## Fluxo obrigatório para qualquer mudança de código ou de banco
+1. Validação antes de todo commit (fluxo acima).
+2. Numeração de migration conferida na pasta, nunca de memória.
+3. Este arquivo é parte da entrega: decisão nova entra aqui no mesmo commit.
+4. Documentação viva em `F:\Projetos\adega-sb-docs`: `HANDOFF-IA.md`, `parecer-acesso-enterprise.md`, `roadmap-enterprise.md`, `PRD-*.md`, `auditoria-cisa-AAAA-MM-DD.html` (nova data a cada entrega).
+5. CI vermelha = não faz merge.
+6. Número só de execução real ou leitura no código; "não existe" só com busca negativa.
+7. **Manter o que já temos:** protótipos e especificação (`adega-sb-docs\referencia\`) são o contrato funcional.
+8. Um passo por vez com validação (Regra nº 1).
 
-1. Trabalhar sempre em `F:\Projetos\adega-sb-staging`; nunca editar direto em `F:\Projetos\adega-sb`.
-2. Validar local primeiro: `npm run type-check` → `npm run lint` → `npm run build` → `npm run e2e`.
-3. Commit + push na branch `staging`, nunca direto em `main`.
-4. Migration: aplicar/testar no banco de staging; depois **aplicar em produção (preflight → migration → pgTAP) ANTES do merge** que deploya. Pegadinha: rodar os comandos no **PowerShell 7 (`pwsh`)**; `supabase start`/teste local exige **Docker Desktop aberto**.
-5. Só depois de validado, merge em `main` — único gatilho que toca produção.
+## Pegadinhas do Windows / PowerShell
 
-Push ao GitHub: conta da organização `connection-adega-sb` via `gh auth login` (device flow). Token pessoal existe (referência truncada); expiração **a registrar aqui** no primeiro push.
-
-Merge é local, sem PR: com CI verde, `cd F:\Projetos\adega-sb` → `git fetch` → `git merge origin/staging` → `git push origin main` (deploy dispara).
-
-Essa regra vale para qualquer IA ou pessoa trabalhando neste projeto a partir de 2026-10-08, mesmo sem ser lembrada a cada tarefa.
-
-## Regras permanentes de sessão (auto-aplicáveis)
-
-1. **Validação antes de qualquer commit** — tudo em staging: `type-check` → `lint` → `build`, com o dev server **parado** antes do build.
-2. **Migrations — conferir a numeração na pasta antes de criar** — listar `supabase/migrations/` e usar o próximo número livre; nunca confiar em memória de sessão. Nasce e é testada no staging; o mesmo SQL vai para produção só depois.
-3. **Este arquivo faz parte da entrega** — decisão/padrão novo entra aqui no mesmo commit.
-4. **Documentação viva** — decisões ficam em `F:\Projetos\adega-sb-docs`: `parecer-acesso-enterprise.md`, `roadmap-enterprise.md`, `PRD-*.md` por módulo e `auditoria-cisa-AAAA-MM-DD.html` (nova data a cada entrega). Comentário datado no código só em ponto não-óbvio.
-5. **CI obrigatória** — todo push roda `.github/workflows/ci.yml` (lint → type-check → build → E2E). Vermelha = não faz merge. `gh run watch <id> --exit-status` (workdir dentro do repo). **Criada em 08/10; roda a partir do primeiro push.**
-6. **Número só de execução real ou leitura no código** — afirmação "funciona" leva `arquivo:linha` ou "check executado"; "não existe" leva busca negativa.
-7. **Manter o que já temos** — as regras e telas dos protótipos (pasta `adega-sb-docs\referencia\`) são o contrato funcional. Mudar uma regra exige registrar a mudança no PRD do módulo e aqui.
+1. SQL (`select ...`) vai no **SQL Editor** do navegador; `cd`, `npx`, `node`, `npm`, `git`, `gh` vão no **PowerShell**.
+2. `npm run <script> -- arg "Nome Composto"` perde as aspas no PowerShell → rodar `node` direto: `node --env-file=.env.local scripts/criar-master.mjs email "Nome Completo"`.
+3. Colar vários comandos de uma vez gruda linhas (`db pushcd ...`). Colar um bloco e esperar o `PS F:\...>` voltar.
+4. Arquivos gravados por PowerShell: `-Encoding ascii` (sem BOM).
 
 ## Testes
 
-1. **pgTAP** por migration: `supabase/tests/NNNN_test.sql` (+ `supabase/preflight/NNNN_preflight.sql` e `supabase/rollback/NNNN_rollback.sql`). Gate = `falhas = 0`, nas **duas bases** (ver "Ritual de migration"). **Hoje: 1 suíte (`0001_test.sql`, 27 asserts) — 27/27 em Postgres 18 local; nas bases Supabase: pendente.**
-2. **E2E Playwright do produto** (`e2e/*.cjs`, Chromium): `npm run e2e` → `e2e/run.cjs` roda as suítes em ordem e para no primeiro FAIL. **Hoje: 1 suíte (`acesso-gate.cjs`) · última execução 2026-10-08: 17 checks, 17 PASS · 0 falhas.** A suíte sobe o build sozinha nas portas 3101/3102 (rode `npm run build` antes; nada pode estar ocupando essas portas). Primeira vez na máquina: `npx playwright install chromium`.
-3. **Suíte dos protótipos (referência funcional, não é o produto):** `adega-sb-docs\referencia\qa\proto-adega.cjs` — **1 suíte · última execução 2026-10-08 17:50 UTC (reexecutada após logo e endereço novos): 40 checks, 40 PASS · 0 falhas** (`proto-adega.result.json`). Imprime `TOTAL:` no fim. Precisa de `QA_LIBS` apontando para uma pasta com `node_modules` (playwright, react 18 UMD, react-dom, @babel/standalone). É a **base de helpers** das suítes E2E do produto: cada check vira check do módulo real.
-4. Smokes de produção (só leitura): `e2e/prod-smoke-*.cjs` — **a criar na Fase 1**.
+1. **E2E do produto** — `npm run e2e` (`e2e/run.cjs`): guarda o `.env.local`, faz build própria em `.next-e2e` **sem** ele, roda `e2e/acesso-gate.cjs` (sobe o app nas portas 3101/3102) e devolve o `.env.local` (também em Ctrl+C). Motivo: o Next embute `NEXT_PUBLIC_*` no build e o `next start` lê o `.env.local`; com ele, os testes de "sem configuração → 503" falhavam (7 FAIL em 09/10 00:48). **Hoje: 19/19** (máquina do Joaquim, 2026-10-09 00:57). Na CI (commit `8ac5738`): **17/17** (a versão com 19 entra no 2º commit).
+2. **pgTAP** — `0001_test.sql` (27) + `0002_test.sql` (14) = **41/41** em Postgres 18 local com permissões iguais às do staging (08/10). **Nas bases Supabase: não executado** (próximo passo do roteiro).
+3. **Protótipos** — `adega-sb-docs\referencia\qa\proto-adega.cjs`: **40/40** (2026-10-08 17:50 UTC).
+4. **Validação manual no staging (2026-10-08/09):** master criado e logado · troca de senha obrigatória (master e caixa) · usuário Caixa no local Loja criado pela tela · Caixa não vê "Usuários e acessos" · Caixa recebe **403** em `/admin/usuarios` (09/10 00:10) · área Protótipos lista 4 cards (09/10 01:02).
 
-## Acesso e identidade — Fase 1 (2026-10-08)
+## Fase 1 — Acesso e identidade (2026-10-08 → 09)
 
-1. **Entrega** — Next.js 15.5 + React 19 + TypeScript + Tailwind 4; Supabase SSR (`@supabase/ssr`). Arquivos: `src/middleware.ts` (fail-closed), `src/lib/papeis.ts` (10 papéis + acesso por rota), `src/lib/sessao.ts` (`exigirSessao`), `src/app/login`, `src/app/painel`, `src/app/conta/senha`, `src/app/admin/usuarios` (só master; senha inicial exibida 1×), `scripts/criar-master.mjs` (`npm run master -- email "Nome"`), `supabase/migrations/0001_acesso.sql`.
-2. **Regras** — sem env → 503 (`/indisponivel`); sem sessão → `/login?next=`; perfil inexistente/inativo ou papel sem acesso → 403 (`/sem-acesso`); `next` só aceita caminho interno (bloqueia `//host`); papel vale **por local** (`profile_locais`); master e gerente valem para todos os locais.
-3. **Pegadinha** — fonte Source Sans 3 vem do pacote `@fontsource/source-sans-3` (servida pelo app), não do `next/font/google`: o build não depende de rede externa.
-4. **Pegadinha** — `.gitignore` ignora `.env*`, com exceção `!.env.example`. Nunca commitar `.env.local`.
-5. **Pegadinha** — o pgTAP insere em `auth.users` só `(id, email)`. Validado num Postgres 18 com esqueleto do Supabase; se a versão do Auth do projeto exigir outra coluna, o erro aparece no assert 18 → acrescentar a coluna no INSERT do teste (não na migration).
-6. **Pegadinha (descoberta no staging, 08/10 16:50)** — o projeto Supabase **não concede** SELECT/INSERT/UPDATE/DELETE em tabela nova: `anon`, `authenticated` e `service_role` ficaram só com REFERENCES, TRIGGER, TRUNCATE. Sintoma: `criar-master` não lê o tenant e o login não acha o perfil. Correção: `0002_permissoes_data_api.sql` (concede o mínimo e revoga TRUNCATE/TRIGGER/REFERENCES). **Regra:** toda migration nova termina com os `grant` explícitos das tabelas que cria, e o pgTAP confere com `has_table_privilege`.
-7. **Pegadinha** — `audit_log` é append-only (trigger recusa update/delete com 42501) e guarda `antes/depois` em `jsonb` (exceção registrada à regra 5 de modelagem: é snapshot de auditoria).
-8. **Teste** — E2E `e2e/acesso-gate.cjs` **17/17** (local e na máquina do Joaquim, 08/10) · pgTAP `0001_test.sql` 27 + `0002_test.sql` 14 = **41/41** em Postgres 18 local com as permissões padrão iguais às do staging · **0001 aplicada no staging em 08/10 16:43** (`db push` OK; 3 locais conferidos no SQL Editor) · 0002 e pgTAP no staging: pendentes.
-9. **Pendências** — aplicar 0002 no staging e 0001+0002 em produção (dev); criar master (cliente); deploy Vercel com env por ambiente (dev); suíte E2E de login real com usuário de teste no staging (dev, após a 0001); MFA para master/gerente (Fase 2).
+1. **Entrega:** Next.js 15.5 + React 19 + TS + Tailwind 4 + `@supabase/ssr`. `src/middleware.ts` (fail-closed), `src/lib/papeis.ts` (10 papéis + acesso por rota), `src/lib/sessao.ts`, rotas `/login`, `/painel`, `/conta/senha`, `/admin/usuarios` (master), `/prototipos` (master/gerente), `/sem-acesso`, `/indisponivel`, `/api/health`; `scripts/criar-master.mjs`.
+2. **Regras:** sem env → 503 · sem sessão → `/login?next=` · sem perfil/ativo/papel → 403 · `next` só caminho interno · papel por local (`profile_locais`); master/gerente = todos.
+3. **Banco:** `0001_acesso` (tenants, locais loja/bar/depósito, profiles, profile_locais, audit_log append-only; RLS deny-all + 2 policies de leitura própria) · `0002_permissoes_data_api` (grants mínimos; revoga TRUNCATE/TRIGGER/REFERENCES).
+4. **Pegadinha:** fonte via `@fontsource/source-sans-3` (build sem rede externa).
+5. **Pegadinha:** `.gitignore` → `.env*` (exceto `!.env.example`), `supabase/.temp/` (cache do CLI com o endereço do pooler — tirado do 1º commit em 09/10), `/.next-e2e/`.
+6. **Pegadinha (08/10 16:50):** o projeto Supabase **não concede** SELECT/INSERT/UPDATE/DELETE em tabela nova (só REFERENCES/TRIGGER/TRUNCATE) → `0002`. Regra: grants explícitos em toda migration.
+7. **Pegadinha:** protótipos em `public/prototipos/` usam `X-Frame-Options: SAMEORIGIN` (o PDV abre o site num quadro); o resto do app usa `DENY` (`next.config.ts`).
+8. **Pegadinha (CI):** avisos de Node.js 20 nas actions e migração do `ubuntu-latest` para Ubuntu 26 em 19/10/2026 → atualizar para `actions/checkout@v5` e `actions/setup-node@v5`.
 
-## Referência funcional — protótipos (2026-10-07)
+## Referência funcional (2026-10-07) — "o que já tínhamos"
 
-1. **O que existe** — 4 protótipos HTML (React 18 + Tailwind) gerados por um modelo único multimarca: PDV (com site da loja no mesmo link), Vendas, Compras, Site. Pasta `adega-sb-docs\referencia\prototipos\`. Especificação: `referencia\especificacao\modulo-pdv.md` (53 regras), `modulo-vendas.md` (55), `modulo-compras.md` (29) = **137 regras com ID**, **32 tabelas desenhadas** (`create table` nos três módulos) — contagem por leitura em 2026-10-08.
-2. **Pegadinha** — os protótipos guardam estado no navegador (localStorage); no produto, todo valor (preço, total, taxa, status) é **recalculado no servidor**. Nunca confiar em total vindo do navegador (o protótipo já precisou de `toFixed(2)` para não gravar `83.88000000000001`).
-3. **Pegadinha** — publicado como artifact, abrir o site em **nova aba** dá `ERR_BLOCKED_BY_RESPONSE`; o protótipo abre o site num quadro do próprio PDV. No produto a ponte é API (`pedidoApp` + status por SSE/consulta), não armazenamento do navegador.
-4. **Teste** — `proto-adega.cjs` 40/40.
+1. Protótipos HTML: PDV (com site e app do cliente), Site, Vendas, Compras — em `adega-sb-docs\referencia\prototipos\` e dentro do app em `/prototipos` (só master/gerente). Dados **só no navegador**.
+2. Especificação: `modulo-pdv.md` (53 regras), `modulo-vendas.md` (55), `modulo-compras.md` (29) = **137 regras**, **32 tabelas desenhadas**.
+3. Cada protótipo vira módulo real: estoque F2 · PDV F3 · bar F4 · delivery/site F5 · plataformas F6 · distribuidora F7 · compras F8.
+4. Pegadinha: no produto, todo valor é recalculado no servidor (nunca total vindo do navegador).
 
-## Identidade visual (2026-10-07 · kit oficial 2026-10-08)
+## Identidade visual
 
-1. Brandbook 2026: azul profundo `#232F3E`, laranja `#FF9900`, grafite `#000`, pérola `#E9EAEC`, fonte Source Sans 3. Tokens em `referencia\especificacao\identidade-visual.md`. Brandbook atualizado em 08/10 (`adega-sb-docs\identidade-visual\ADEGA SB brandbook.pdf`): única mudança de texto = nome em caixa-alta **ADEGA SB** (cores e fontes iguais — diff do texto das 13 páginas).
-2. **Kit oficial** (`identidade-visual\Print|Web|Social media`, 06/10): logo nas versões colour/black/white/reversed (PNG 2000×825, SVG, EPS, PDF) e favicons. App usa `public/brand/logo-colour.png` (colour com o azul tornado transparente) e `logo-black.png`.
-3. **Pegadinha do kit** — os arquivos `symbol-*` são **idênticos** aos `logo-*` (SVG byte a byte; PNG mesma imagem): o kit não tem o símbolo isolado, e os favicons trazem o logo inteiro ("ADEGA SB" ilegível em 16–48 px). **Provisório:** símbolo (só o brinde) derivado do logo oficial → `public/brand/simbolo-*.png` e `src/app/icon.png`. Pedir ao designer o símbolo e os favicons oficiais.
-4. **Pegadinha** — laranja `#FF9900` com texto branco = 2,1:1 (reprova WCAG). Botão de ação = `#A85F00` (4,9:1). `#FF9900` só no logo e em destaque sobre o azul (6,3:1).
-5. **Pegadinha** — o logo já contém "ADEGA SB": o topo não repete o nome em texto (fica `sr-only`).
-6. **Pegadinha (CSS)** — `backdrop-filter` no topo vira "containing block" de `position: fixed`; o menu móvel ficou preso no topo. Sem `backdrop-filter` no topo móvel.
+1. Brandbook 2026: azul `#232F3E`, laranja `#FF9900` (só marca/destaque), ação `#A85F00` (AA), pérola `#E9EAEC`, Source Sans 3.
+2. Kit oficial em `adega-sb-docs\identidade-visual\`. **Pegadinha:** `symbol-*` = `logo-*` (kit sem símbolo isolado) → símbolo e favicons **provisórios** derivados (`public/brand/simbolo-*`, `src/app/icon.png`).
 
-## Vendas, delivery e site (2026-10-07)
+## Regras de negócio herdadas (valem para os próximos módulos)
 
-1. **Decisão** — toda venda do caixa (F12) é venda padrão de balcão; F9 abre Vendas do dia (Balcão · Delivery · App); venda de balcão pode virar delivery (romaneio); pedido do app/site já nasce entrega (regras DL-01…DL-13).
-2. **Pegadinha** — itens `adulto` exigem "maior de 18, documento conferido" no PDV e aceite no site/app (Lei 13.106/2015); confirmação de idade na entrada do site.
-3. **Teste** — protótipo: `PDV-10`, `ST-02`, `ST-08`, `DL-13a`, `DL-13b` PASS.
-4. **Pendências** — taxas por bairro e horários são de exemplo. ~~Bairros centrados no Montanhão~~ — **RESOLVIDA em 08/10**: protótipos com o endereço da R. Jerônimo de Ataíde, 10 (Jardim Silvinia, CEP 09791-290) e taxa base no Jardim Silvinia. Confirmar a grafia oficial do bairro no CEP ("Silvinia" × "Silvina").
+1. Item `adulto`: confirmação de maioridade no PDV e no site/app (Lei 13.106/2015).
+2. Item `fumigeno`: nunca fracionado, só embalagem lacrada, +18, fora do site e do app (Lei 9.294/1996).
+3. Copão: CMV pela ficha técnica, markup 2,5 (2,0–3,0), arredonda ao múltiplo de R$ 5 mais próximo; fracionado arredonda para cima.
 
-## Precificação, copão e tabacaria (2026-10-07)
+## Regras de modelagem
 
-1. **Decisão** — ficha técnica do copão: custo na receita = preço ÷ embalagem × quantidade; CMV = soma; preço = CMV × markup (padrão 2,5; faixa 2,0–3,0), arredondado ao múltiplo de R$ 5 **mais próximo**. Fracionamento: custo ÷ unidades × (1 + margem), arredondado **para cima** (troco). Regras PR-01…PR-08.
-2. **Pegadinha** — os dois arredondamentos são diferentes de propósito (copão: mais próximo; fracionado: para cima).
-3. **Regra legal** — produto fumígeno (`fumigeno = true`) **nunca** é fracionado (venda de cigarro avulso é ilegal — Lei 9.294/1996 e ANVISA), só maço lacrado, sempre +18, **fora do site e do app**.
-4. **Teste** — protótipo `PR-01`…`PR-06`, `PDV-09`, `ST-04` PASS.
-
-## Regras de modelagem de dados (adotadas desde a 1ª migration)
-
-1. Todo ID é UUID v4 (`gen_random_uuid()`) — nunca serial. (Os SQL de referência dos protótipos já seguem isso.)
-2. Toda tabela de negócio carrega `tenant_id uuid not null` — nunca assume loja única (há **3 locais**: loja/balcão, bar, depósito; e futuras unidades).
-3. Toda tabela de negócio com estoque ou venda carrega `local_id` quando o fato acontece em um local físico.
-4. RLS ligado em **toda** tabela nova; deny-all por padrão; policy explícita por necessidade.
-5. Nada de coluna JSON para dado consultável — vira tabela com índice. (Payload bruto de webhook — iFood, Mercado Pago — pode ficar em `jsonb` **só** na tabela de log da integração.)
-6. Dinheiro em `numeric(12,2)`; quantidade em `numeric(12,3)` (ml, kg, fração de garrafa).
+1. UUID v4 · 2. `tenant_id` em toda tabela de negócio · 3. `local_id` onde há fato físico · 4. RLS deny-all + policy explícita · 5. **grants explícitos** · 6. sem JSON para dado consultável (exceção: snapshot de auditoria e payload bruto de webhook) · 7. dinheiro `numeric(12,2)`, quantidade `numeric(12,3)`.
 
 ## Pendências nomeadas
 
-1. **Enquadramento e CNAE** (cliente + contador) — comprovante mostra porte ME / Empresário Individual, sem CNAE de bar (56.11-2) nem de atacado/distribuidora de bebidas (46.35-4) nem de transporte; cliente declara MEI com funcionários, bar, depósito e distribuidora. Confirmar regime (MEI tem limite de faturamento, de empregado e lista fechada de atividades) **antes** do módulo fiscal.
-2. **Endereço** (cliente) — CNPJ ainda no Montanhão (CEP 09791-250); operação declarada na Rua Jerônimo de Ataíde, 10 (CEP 09791-290). Atualizar RFB/Prefeitura/SEFAZ; IE a informar.
-3. **Verificação dos bancos** (dev) — esta sessão não alcançou os dois projetos Supabase (conector sem acesso à organização; REST bloqueado pela rede). Rodar o inventário (parecer §1) **antes** do preflight da 0001.
-6. **Símbolo e favicons oficiais** (designer) — o kit entregue repete o logo nos arquivos `symbol-*`; em uso: símbolo derivado provisório.
-7. **Pasta `diversos`** (cliente) — `diversos\Adega_SB_docs` e `diversos\Adega_SB_PDV_e_site` são as versões de 07/10 03:31 (antes do site dentro do PDV, do copão/tabacaria e do endereço novo). Arquivar em `adega-sb-docs\_arquivo\2026-10-07`; a referência válida é `referencia\`.
-4. **Referências citadas e não anexadas** — `QA-PROCEDIMENTO-TESTES.md` e `GOVERNANCA-IA-E-DESENVOLVIMENTO.md`: anexar para alinhar o procedimento de QA e governança.
-5. **Netlify × Vercel** (cliente) — default: app no Vercel; Netlify sem papel até decisão.
+1. **Enquadramento e CNAE** (cliente + contador): MEI × ME; sem CNAE de bar, atacado e transporte. Bloqueia o fiscal.
+2. **Endereço** (cliente): CNPJ no Montanhão × operação no Jardim Silvinia; IE a informar; confirmar grafia "Silvinia" × "Silvina".
+3. **Produção** (dev + cliente): roteiro em `HANDOFF-IA.md` §6 — nada aplicado ainda.
+4. **pgTAP nas bases Supabase** (dev).
+5. **Validar o site dentro do PDV na área Protótipos** (passo 16 ficou pela metade em 09/10 01:02).
+6. **Símbolo e favicons oficiais** (designer).
+7. **CI**: actions v5 (avisos de 09/10).
+8. **Netlify** (cliente): sem papel definido; app no Vercel.
+9. **Referências não anexadas:** `QA-PROCEDIMENTO-TESTES.md`, `GOVERNANCA-IA-E-DESENVOLVIMENTO.md`.
+10. **Usuário de teste `CaixaTeste`** (`providercyber@gmail.com`) existe no staging — manter só no staging.
 
 ---
 
-**Contadores vivos** (2026-10-08 16:55): migrations **2** (`0001`, `0002`) · staging: 0001 aplicada · tabelas **5** previstas pela 0001 (5 com RLS) — nas bases Supabase **não verificado** · suítes pgTAP **2** / **41** asserts PASS (Postgres local) · E2E do produto **1** suíte / **17** checks PASS · rotas no build **11** + middleware · CI: workflow criada, **ainda não rodou no GitHub** · protótipo **1** suíte / **40** checks PASS · especificação **137** regras / **32** tabelas desenhadas.
+**Contadores vivos** (2026-10-09 01:10): migrations **2** (`0001`, `0002`) — staging: **aplicadas** · produção: **0** · tabelas da 0001: **5** (5 com RLS) · pgTAP **2** suítes / **41** asserts (local) · E2E **1** suíte / **19** checks (local) · CI: **1** run verde (`37880010084`) · rotas **12** + middleware · usuários staging: **2** (master + caixa teste) · protótipo **40/40** · especificação **137** regras / **32** tabelas.
