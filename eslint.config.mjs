@@ -22,7 +22,7 @@ const eslintConfig = [
     ],
   },
   // Suítes E2E e scripts rodam em Node puro (CommonJS): require é o padrão ali.
-  { files: ["e2e/**/*.cjs"], rules: { "@typescript-eslint/no-require-imports": "off" } },
+  { files: ["e2e/**/*.cjs", "scripts/**/*.cjs"], rules: { "@typescript-eslint/no-require-imports": "off" } },
 ];
 
 export default eslintConfig;
