@@ -1,7 +1,9 @@
--- 0003_seed_catalogo_exemplo.sql · SÓ STAGING (catálogo de demonstração do protótipo).
--- NUNCA rodar em produção (dados de exemplo). Fonte: referencia/prototipos/index.html SAMPLE_PRODUCTS.
--- Idempotente: usa on conflict / where not exists para rodar 2x sem duplicar.
--- Estoque inicial entra na LOJA (local 'loja') via função estoque_movimentar (audita o movimento).
+-- 0003_seed_catalogo_exemplo.sql · catálogo de DEMONSTRAÇÃO (28 produtos, idempotente).
+-- Roda em staging e em produção ENQUANTO não existe catálogo real (ambientes privados, sem venda real).
+-- Quando o catálogo real entrar (fase 2), substituir: apagar os produtos de exemplo (carga inicial
+-- marcada com o motivo 'carga inicial do catalogo de exemplo' em estoque_movimentos) e importar o real.
+-- Fonte: referencia/prototipos/index.html SAMPLE_PRODUCTS. Estoque inicial entra na LOJA via
+-- estoque_movimentar (audita o movimento).
 set search_path = public;
 
 do $$

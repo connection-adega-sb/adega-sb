@@ -44,3 +44,6 @@ next-env.d.ts
 
 # Supabase CLI: cache local do link (nunca versionar)
 supabase/.temp/
+
+# pgTAP via `db query` (gerado por scripts/gate-pgtap.cjs, não versionar)
+supabase/tests/_gate_*.sql
