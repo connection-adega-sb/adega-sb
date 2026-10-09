@@ -1,0 +1,21 @@
+-- 0002_test.sql - pgTAP das permissoes. Rodar depois da 0002, nas duas bases.
+create extension if not exists pgtap with schema extensions;
+set search_path = public, extensions;
+begin;
+select plan(14);
+select ok(has_table_privilege('service_role', 'public.tenants', 'SELECT'), 'service_role le tenants');
+select ok(has_table_privilege('service_role', 'public.profiles', 'INSERT'), 'service_role cria perfis');
+select ok(has_table_privilege('service_role', 'public.profiles', 'UPDATE'), 'service_role altera perfis');
+select ok(has_table_privilege('service_role', 'public.profile_locais', 'DELETE'), 'service_role remove vinculos');
+select ok(has_table_privilege('service_role', 'public.locais', 'SELECT'), 'service_role le locais');
+select ok(has_table_privilege('service_role', 'public.audit_log', 'SELECT'), 'service_role le audit_log');
+select ok(not has_table_privilege('service_role', 'public.audit_log', 'DELETE'), 'service_role NAO apaga audit_log');
+select ok(has_table_privilege('authenticated', 'public.profiles', 'SELECT'), 'logado le profiles (RLS filtra)');
+select ok(not has_table_privilege('authenticated', 'public.profiles', 'UPDATE'), 'logado NAO altera profiles');
+select ok(not has_table_privilege('authenticated', 'public.tenants', 'SELECT'), 'logado NAO le tenants');
+select ok(not has_table_privilege('anon', 'public.profiles', 'SELECT'), 'anonimo NAO le profiles');
+select ok(not has_table_privilege('anon', 'public.tenants', 'TRUNCATE'), 'anonimo sem TRUNCATE');
+select ok(not has_table_privilege('authenticated', 'public.profiles', 'TRUNCATE'), 'logado sem TRUNCATE');
+select is((select count(*)::int from public.tenants), 1, 'tenant ADEGA SB continua la');
+select * from finish();
+rollback;

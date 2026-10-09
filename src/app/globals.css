@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* Tokens do brandbook ADEGA SB 2026 (adega-sb-docs/referencia/especificacao/identidade-visual.md).
+   Laranja #FF9900 só em marca/destaque; ação com texto branco usa #A85F00 (4,9:1, WCAG AA). */
+@theme {
+  --color-fundo: #E9EAEC;
+  --color-estrutura: #232F3E;
+  --color-estrutura-light: #2E3D50;
+  --color-acao-100: #FFF1DC;
+  --color-acao-300: #FFC266;
+  --color-acao-600: #A85F00;
+  --color-acao-700: #8F4A00;
+  --color-marca: #FF9900;
+  --color-ink: #10151C;
+  --color-ink-soft: #525B6B;
+  --color-ink-faint: #C9CDD3;
+  --color-line: #CDD1D6;
+  --color-line-input: #7A7F87;
+  --color-ok: #1E7F4F;
+  --color-bad: #B42318;
+  --color-warn: #B54708;
+  --font-sans: 'Source Sans 3', system-ui, sans-serif;
+  --radius-card: 12px;
+  --radius-banner: 18px;
+}
+
+html { color-scheme: light; }
+body { background: var(--color-fundo); color: var(--color-ink); font-family: var(--font-sans); }
+:focus-visible { outline: 3px solid var(--color-acao-600); outline-offset: 2px; }
