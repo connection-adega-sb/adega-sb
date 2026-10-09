@@ -1,7 +1,7 @@
 # AGENTS.md — ADEGA SB
 
-> **Doc viva.** Criado em 2026-10-08 · Última atualização: **2026-10-09 03:40** (produção no ar no Netlify; master de produção criado; correção do PDV em /prototipos/pdv.html).
-> **Status:** Fase 0 CONCLUÍDA · Fase 1 **CONCLUÍDA EM STAGING E PRODUÇÃO** (`https://adega-sb.netlify.app`, branch `main`) · próximo módulo: F2 catálogo e estoque (`0003`).
+> **Doc viva.** Criado em 2026-10-08 · Última atualização: **2026-10-09 14:50** (F3 PDV balcão + catálogo mínimo entregues em staging: migration `0003` aplicada, seed de 28 produtos, rota `/pdv`).
+> **Status:** Fase 0 CONCLUÍDA · Fase 1 **CONCLUÍDA EM STAGING E PRODUÇÃO** (`https://adega-sb.netlify.app`, branch `main`) · **F3 PDV + catálogo mínimo CONCLUÍDO EM STAGING** (produção pendente de merge) · próxima: fechar F1 §7.0 / catálogo profundo (`0004` livre).
 > Leia também: `F:\Projetos\adega-sb-docs\HANDOFF-IA.md` (documento global de passagem). Toda decisão nova entra aqui **no mesmo commit** da mudança.
 
 ## Regra nº 1 — um passo por vez, com validação
@@ -150,4 +150,4 @@ Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch padrã
 
 ---
 
-**Contadores vivos** (2026-10-09 03:40): migrations **2** (`0001`, `0002`) — staging: **aplicadas** · produção: **aplicadas** · tabelas: **5** (5 com RLS) · pgTAP **41/41** em local, staging e produção · E2E **19** checks · CI verde em `8ac5738` e `818ff3d` · rotas **12** + middleware · usuários: staging **2**, produção **1** (master) · protótipo **40/40** · especificação **137** regras / **32** tabelas.
+**Contadores vivos** (2026-10-09 14:50): migrations **3** (`0001`, `0002`, `0003`) — staging: **3 aplicadas** · produção: **`0001`+`0002` aplicadas** (`0003` pendente de merge) · tabelas: **14** (14 com RLS) · pgTAP **59/59** (`0001` 27 + `0002` 14 + `0003` 18) em local e staging (produção: 41/41) · E2E **21** checks · CI verde em `8ac5738`, `818ff3d`, `63cb16b` · rotas **13** + middleware · seed de staging: **28 produtos / 9 categorias / 1 caixa** · usuários: staging **2**, produção **1** (master) · protótipo **40/40** · especificação **137** regras / **32** tabelas.
