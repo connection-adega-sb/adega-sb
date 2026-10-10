@@ -76,9 +76,9 @@ try {
   }
   Ok "ambiente base pronto"
 
-  # 3. As 5 migrations em ordem (0001 cria tenant + 3 locais; 0005 é a nova)
-  Passo "Aplicando migrations 0001 → 0005..."
-  foreach ($n in @("0001_acesso", "0002_permissoes_data_api", "0003_pdv_catalogo", "0004_catalogo_estoque", "0005_bar")) {
+  # 3. As 6 migrations em ordem (0001 cria tenant + 3 locais; 0006 é a nova)
+  Passo "Aplicando migrations 0001 → 0006..."
+  foreach ($n in @("0001_acesso", "0002_permissoes_data_api", "0003_pdv_catalogo", "0004_catalogo_estoque", "0005_bar", "0006_comanda_remover_item")) {
     $arq = "supabase\migrations\$n.sql"
     if (-not (Test-Path $arq)) { throw "migration não encontrada: $arq" }
     Rodar-Sql $arq $n | Out-Null
@@ -121,9 +121,22 @@ try {
   $oks5    = ($saida5 -split "`n" | Where-Object { $_ -match "^ok " })
   Write-Host ($saida5 -split "`n" | Where-Object { $_ -match "^(ok|not ok)" })
   if ($falhas5.Count -gt 0) { throw "0005: $($falhas5.Count) assert(s) falharam" }
+  $totalAntes += $oks5.Count
 
+  # 7. Teste da 0006 (comportamental: remover item da comanda e recalcular o total)
+  Passo "Rodando pgTAP 0006 (12 asserts, comportamental)..."
+  $gate6 = "supabase\tests\_gate_0006.sql"
+  node scripts\gate-pgtap.cjs "supabase\tests\0006_test.sql" $gate6 | Out-Null
+  $saida6 = Rodar-Sql $gate6 "0006_test"
+  Remove-Item $gate6, $gate4, $gate5 -ErrorAction SilentlyContinue
+  $falhas6 = ($saida6 -split "`n" | Where-Object { $_ -match "^not ok" })
+  $oks6    = ($saida6 -split "`n" | Where-Object { $_ -match "^ok " })
+  Write-Host ($saida6 -split "`n" | Where-Object { $_ -match "^(ok|not ok)" })
+  if ($falhas6.Count -gt 0) { throw "0006: $($falhas6.Count) assert(s) falharam" }
+
+  # $totalAntes = 0001+0002+0003+0004+0005
   Write-Host ""
-  Write-Host "PGTAP LOCAL: TUDO VERDE — $($totalAntes - $oks4.Count) anteriores + $($oks4.Count) da 0004 + $($oks5.Count) da 0005" -ForegroundColor Green
+  Write-Host "PGTAP LOCAL: TUDO VERDE — $($totalAntes) (0001–0005) + $($oks6.Count) da 0006 = $($totalAntes + $oks6.Count)" -ForegroundColor Green
 }
 finally {
   if ($Manter) { Write-Host "container '$container' mantido na porta $Porta (para depurar)" -ForegroundColor Yellow }

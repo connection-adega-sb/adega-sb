@@ -12,6 +12,7 @@ export const ACESSO_ROTA: { prefixo: string; papeis: readonly Papel[] }[] = [
   { prefixo: '/admin', papeis: ['master'] },
   { prefixo: '/prototipos', papeis: ['master', 'gerente'] },   // protótipos HTML de referência (public/prototipos)
   { prefixo: '/pdv', papeis: ['master', 'gerente', 'caixa'] }, // PDV balcão (modulo-pdv.md §8)
+  { prefixo: '/bar', papeis: ['master', 'gerente', 'bartender', 'caixa'] }, // mesas/comandas/copão (roadmap F4.1)
   { prefixo: '/estoque', papeis: ['master', 'gerente', 'estoquista'] }, // catálogo + estoque profundo (PRD-catalogo-estoque-multilocal.md)
 ];
 

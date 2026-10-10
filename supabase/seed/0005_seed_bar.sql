@@ -111,10 +111,30 @@ begin
       jsonb_build_object('produto_id', (select id from produtos where tenant_id=v_tenant and codigo_barras='7898114'), 'quantidade', 200, 'unidade', 'ml')));
   end if;
 
-  raise notice 'seed bar: % preparados, % fichas, % saldos no bar',
+  -- ---------------------------------------------------------------- 5. caixa do bar
+  -- copao_vender recusa sessão de outro local (sessao.local_id <> p_local), então o bar
+  -- precisa do próprio caixa; senão só dá para fechar comanda no caixa da loja.
+  insert into public.caixas (tenant_id, local_id, nome, ativo)
+  select v_tenant, v_bar, 'Caixa #02 · Bar', true
+   where not exists (
+    select 1 from public.caixas c
+     where c.tenant_id = v_tenant and c.local_id = v_bar and c.nome = 'Caixa #02 · Bar');
+
+  -- ---------------------------------------------------------------- 6. mesas do bar
+  -- sem mesas a tela /bar fica vazia. 10 mesas de 4 lugares, idempotente pelo código da mesa.
+  insert into public.mesas (tenant_id, local_id, codigo, capacidade)
+  select v_tenant, v_bar, 'M' || lpad(n::text, 2, '0'), 4
+  from generate_series(1, 10) as n
+  where not exists (
+    select 1 from public.mesas m
+     where m.tenant_id = v_tenant and m.local_id = v_bar
+       and m.codigo = 'M' || lpad(n::text, 2, '0'));
+
+  raise notice 'seed bar: % preparados, % fichas, % saldos no bar, % mesas',
     (select count(*) from produtos where tenant_id = v_tenant and tipo = 'preparado'),
     (select count(*) from fichas_tecnicas where tenant_id = v_tenant),
-    (select count(*) from estoque_saldos where local_id = v_bar);
+    (select count(*) from estoque_saldos where local_id = v_bar),
+    (select count(*) from mesas where tenant_id = v_tenant and local_id = v_bar);
 end $$;
 
 select 'seed bar OK' as resultado,
@@ -122,5 +142,7 @@ select 'seed bar OK' as resultado,
        (select count(*) from fichas_tecnicas)                      as fichas,
        (select count(*) from estoque_saldos s join locais l on l.id = s.local_id
          where l.codigo = 'bar')                                   as saldos_bar,
+       (select count(*) from caixas)                               as caixas,
+       (select count(*) from mesas)                                as mesas,
        (select coalesce(sum(disponiveis), 0) from copoes_disponiveis(
          (select id from locais where codigo = 'bar')))            as copoes_vendaveis;
