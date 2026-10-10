@@ -76,9 +76,9 @@ try {
   }
   Ok "ambiente base pronto"
 
-  # 3. As 4 migrations em ordem (0001 cria tenant + 3 locais; 0004 é a nova)
-  Passo "Aplicando migrations 0001 → 0004..."
-  foreach ($n in @("0001_acesso", "0002_permissoes_data_api", "0003_pdv_catalogo", "0004_catalogo_estoque")) {
+  # 3. As 5 migrations em ordem (0001 cria tenant + 3 locais; 0005 é a nova)
+  Passo "Aplicando migrations 0001 → 0005..."
+  foreach ($n in @("0001_acesso", "0002_permissoes_data_api", "0003_pdv_catalogo", "0004_catalogo_estoque", "0005_bar")) {
     $arq = "supabase\migrations\$n.sql"
     if (-not (Test-Path $arq)) { throw "migration não encontrada: $arq" }
     Rodar-Sql $arq $n | Out-Null
@@ -109,9 +109,21 @@ try {
   $oks4    = ($saida4 -split "`n" | Where-Object { $_ -match "^ok " })
   Write-Host ($saida4 -split "`n" | Where-Object { $_ -match "^(ok|not ok)" })
   if ($falhas4.Count -gt 0) { throw "0004: $($falhas4.Count) assert(s) falharam" }
+  $totalAntes += $oks4.Count
+
+  # 6. Teste da 0005 (comportamental: mesas, comandas, dividir, aceite F4 do copão no bar)
+  Passo "Rodando pgTAP 0005 (40 asserts, comportamental)..."
+  $gate5 = "supabase\tests\_gate_0005.sql"
+  node scripts\gate-pgtap.cjs "supabase\tests\0005_test.sql" $gate5 | Out-Null
+  $saida5 = Rodar-Sql $gate5 "0005_test"
+  Remove-Item $gate5 -ErrorAction SilentlyContinue
+  $falhas5 = ($saida5 -split "`n" | Where-Object { $_ -match "^not ok" })
+  $oks5    = ($saida5 -split "`n" | Where-Object { $_ -match "^ok " })
+  Write-Host ($saida5 -split "`n" | Where-Object { $_ -match "^(ok|not ok)" })
+  if ($falhas5.Count -gt 0) { throw "0005: $($falhas5.Count) assert(s) falharam" }
 
   Write-Host ""
-  Write-Host "PGTAP LOCAL: TUDO VERDE — $totalAntes anteriores + $($oks4.Count) da 0004" -ForegroundColor Green
+  Write-Host "PGTAP LOCAL: TUDO VERDE — $($totalAntes - $oks4.Count) anteriores + $($oks4.Count) da 0004 + $($oks5.Count) da 0005" -ForegroundColor Green
 }
 finally {
   if ($Manter) { Write-Host "container '$container' mantido na porta $Porta (para depurar)" -ForegroundColor Yellow }
