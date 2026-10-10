@@ -304,3 +304,183 @@ function traduzErro(msg: string): string {
   if (msg.includes('vazia')) return 'A comanda está vazia.';
   return msg;
 }
+
+// ================================================================ módulos do topo do PDV
+// Os 3 botões do header (Precificação · Site da loja · Vendas e entregas F9).
+// Todos leem dado REAL do banco — nenhum dado de protótipo.
+
+// ---------------------------------------------------------------- precificação (fichas da 0004)
+export type FichaPrecificacao = {
+  fichaId: string;
+  produtoId: string;
+  nome: string;
+  sku: string | null;
+  precoVarejo: number;
+  markup: number;
+  cmv: number;
+  precoSugerido: number;
+  margem: number;
+  margemPct: number;
+  insumos: {
+    id: string; nome: string; dose: number; unidade: string;
+    conteudo: number; custoMedio: number; custo: number;
+  }[];
+};
+
+type ProdFicha = { id: string; nome: string; sku: string | null; preco_varejo: number };
+type ProdInsumo = { id: string; nome: string; conteudo: number | null; custo_medio: number | null };
+type FichaLinha = { id: string; markup: number; produtos: ProdFicha | ProdFicha[] | null };
+type InsumoLinha = {
+  ficha_id: string;
+  quantidade: number; unidade: string;
+  produtos: ProdInsumo | ProdInsumo[] | null;
+};
+
+// O PostgREST devolve a FK embutida como objeto quando dá para inferir a cardinalidade e como
+// array quando não dá — aqui a relação é simples (produto_id → produtos), então normaliza.
+const obj = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
+
+export async function listarPrecificacao(): Promise<FichaPrecificacao[]> {
+  const s = await exigirSessao(['master', 'gerente', 'caixa']);
+  const sb = supabaseAdmin();
+
+  const { data: fichas } = await sb.from('fichas_tecnicas')
+    .select('id, markup, produto_id, produtos(id, nome, sku, preco_varejo)')
+    .eq('tenant_id', s.tenantId);
+  if (!fichas?.length) return [];
+
+  const { data: ins } = await sb.from('fichas_tecnicas_insumos')
+    .select('ficha_id, quantidade, unidade, produtos(id, nome, conteudo, custo_medio)')
+    .eq('tenant_id', s.tenantId)
+    .in('ficha_id', fichas.map((f) => f.id));
+
+  const porFicha = new Map<string, InsumoLinha[]>();
+  for (const i of (ins ?? []) as unknown as InsumoLinha[]) {
+    const lista = porFicha.get(i.ficha_id) ?? [];
+    lista.push(i);
+    porFicha.set(i.ficha_id, lista);
+  }
+
+  return ((fichas ?? []) as unknown as FichaLinha[])
+    .flatMap((f) => {
+      const prod = obj(f.produtos);
+      if (!prod) return [];
+      // CMV por unidade preparada = Σ (dose ÷ conteúdo) × custo médio  (mesma conta da
+      // ficha_consumir da 0004, que divide a dose pelo conteúdo da embalagem)
+      const insumos = (porFicha.get(f.id) ?? []).map((i) => {
+        const p = obj(i.produtos);
+        const conteudo = Number(p?.conteudo ?? 0) || 1;
+        const unidades = Number(i.quantidade) / conteudo;
+        const custoMedio = Number(p?.custo_medio ?? 0);
+        return {
+          id: p?.id ?? '', nome: p?.nome ?? '—',
+          dose: Number(i.quantidade), unidade: i.unidade,
+          conteudo, custoMedio, custo: unidades * custoMedio,
+        };
+      });
+      const cmv = insumos.reduce((a, x) => a + x.custo, 0);
+      const markup = Number(f.markup);
+      const precoSugerido = cmv * markup;
+      const precoVarejo = Number(prod.preco_varejo);
+      return [{
+        fichaId: f.id, produtoId: prod.id,
+        nome: prod.nome, sku: prod.sku,
+        precoVarejo, markup, cmv,
+        precoSugerido,
+        margem: precoSugerido - cmv,
+        margemPct: precoSugerido > 0 ? ((precoSugerido - cmv) / precoSugerido) * 100 : 0,
+        insumos,
+      }];
+    })
+    .sort((a, b) => a.nome.localeCompare(b.nome));
+}
+
+export type ResultadoSimples = { erro?: string; ok?: boolean };
+
+// Aplica o preço sugerido no produto (só quem administra o catálogo).
+export async function aplicarPrecoVarejo(dados: { produtoId: string; preco: number }): Promise<ResultadoSimples> {
+  const s = await exigirSessao(['master', 'gerente']);
+  const p = z.object({ produtoId: UUID, preco: z.coerce.number().min(0.01, 'Preço inválido.') }).safeParse(dados);
+  if (!p.success) return { erro: p.error.issues[0].message };
+
+  const sb = supabaseAdmin();
+  const { data, error } = await sb.from('produtos')
+    .update({ preco_varejo: p.data.preco, atualizado_em: new Date().toISOString() })
+    .eq('id', p.data.produtoId).eq('tenant_id', s.tenantId)
+    .select('id').maybeSingle();
+  if (error) return { erro: error.message };
+  if (!data) return { erro: 'Produto não encontrado.' };
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------- vendas do dia (F9)
+export type VendaDia = {
+  id: string; hora: string; canal: string; forma: string;
+  total: number; operador: string; itensQtd: number;
+};
+
+export async function vendasDoDia(): Promise<{ vendas: VendaDia[]; total: number }> {
+  await exigirSessao(['master', 'gerente', 'caixa']);
+  const sb = supabaseAdmin();
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+
+  const { data: vs } = await sb.from('vendas')
+    .select('id, criado_em, canal, forma_pagamento, total, profiles(nome)')
+    .gte('criado_em', hoje.toISOString())
+    .order('criado_em', { ascending: false })
+    .limit(200);
+  if (!vs?.length) return { vendas: [], total: 0 };
+
+  const ids = vs.map((v) => v.id);
+  const { data: itens } = await sb.from('venda_itens')
+    .select('venda_id').in('venda_id', ids);
+  const qtd = new Map<string, number>();
+  for (const i of itens ?? []) qtd.set(i.venda_id, (qtd.get(i.venda_id) ?? 0) + 1);
+
+  const vendas = vs.map((v) => ({
+    id: v.id,
+    hora: new Date(v.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    canal: v.canal,
+    forma: v.forma_pagamento,
+    total: Number(v.total),
+    operador: (v.profiles as unknown as { nome: string } | null)?.nome ?? '—',
+    itensQtd: qtd.get(v.id) ?? 0,
+  }));
+  return { vendas, total: vendas.reduce((a, v) => a + v.total, 0) };
+}
+
+// ---------------------------------------------------------------- catálogo do site (visão do cliente)
+export type ItemSite = {
+  id: string; nome: string; sku: string | null; preco: number;
+  categoria: string | null; adulto: boolean; estoque: number;
+};
+
+export async function catalogoSite(): Promise<{ itens: ItemSite[]; categorias: string[] }> {
+  await exigirSessao(['master', 'gerente', 'caixa']);
+  const sb = supabaseAdmin();
+
+  const { data: cats } = await sb.from('categorias').select('id, nome');
+  const nomeCat = new Map((cats ?? []).map((c) => [c.id, c.nome]));
+
+  const { data: prods } = await sb.from('produtos')
+    .select('id, nome, sku, preco_varejo, categoria_id, adulto, ativo')
+    .eq('ativo', true)
+    .order('nome');
+  if (!prods?.length) return { itens: [], categorias: [] };
+
+  const { data: saldos } = await sb.from('estoque_saldos')
+    .select('produto_id, quantidade').in('produto_id', prods.map((p) => p.id));
+  const saldo = new Map<string, number>();
+  for (const s of saldos ?? []) saldo.set(s.produto_id, (saldo.get(s.produto_id) ?? 0) + Number(s.quantidade));
+
+  const itens = prods.map((p) => ({
+    id: p.id, nome: p.nome, sku: p.sku,
+    preco: Number(p.preco_varejo),
+    categoria: nomeCat.get(p.categoria_id ?? '') ?? null,
+    adulto: p.adulto,
+    estoque: saldo.get(p.id) ?? 0,
+  }));
+  const categorias = [...new Set(itens.map((i) => i.categoria).filter(Boolean) as string[])].sort();
+  return { itens, categorias };
+}

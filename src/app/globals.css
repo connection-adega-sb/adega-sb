@@ -20,8 +20,14 @@
   --color-bad: #B42318;
   --color-warn: #B54708;
   --font-sans: 'Source Sans 3', system-ui, sans-serif;
+  --font-display: 'Source Sans 3', system-ui, sans-serif;
   --radius-card: 12px;
   --radius-banner: 18px;
+  --radius-panel: 10px;
+  /* sombras do protótipo (mesmas do tailwind.config de public/prototipos/pdv.html) */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, .10);
+  --shadow-soft: 0 6px 20px rgba(0, 0, 0, .15);
+  --shadow-acao: 0 4px 16px rgba(168, 95, 0, .30);
 }
 
 html { color-scheme: light; }

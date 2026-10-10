@@ -254,7 +254,7 @@ let browser = null, srv = null;
       (await qtdLinhas(pg)) === 2 && (await aviso(pg)).includes('maior de 18 anos'));
     await pg.getByTestId('pdv-limpar').click();
     await check('P16', 'Limpar zera comanda, desconto e aviso', async () => {
-      await pg.getByTestId('pdv-comanda').getByText('Nenhum item ainda.').waitFor({ timeout: 5000 });
+      await pg.getByTestId('pdv-comanda').getByText('Nenhum item na comanda').waitFor({ timeout: 5000 });
       return (await qtdLinhas(pg)) === 0 && limpa(await pg.getByTestId('pdv-total').innerText()).trim() === 'R$ 0,00'
         && (await pg.getByTestId('pdv-aviso').count()) === 0;
     });
