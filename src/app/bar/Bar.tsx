@@ -6,6 +6,8 @@ import {
   type Estado, type LocalResumo, type Resultado, type Escolha, type MesaLinha,
 } from './actions';
 import { ROTULO_PAPEL, type Papel } from '@/lib/papeis';
+import { CadastroRapidoProduto } from '@/components/CadastroRapidoProduto';
+import type { ProdutoNovo } from '@/app/produtos/actions';
 
 // Tela do bar — F4.1 do roadmap-enterprise.md: grade de mesas, comanda aberta (lançar/remover
 // item, transferir, dividir, fechar no caixa), venda avulsa de copão e caixa do local.
@@ -63,6 +65,8 @@ export function Bar({ locais: locaisInicial, papel, nome, deveTrocarSenha }: {
   const [copaoQtd, setCopaoQtd] = useState(1);
   const [maior18Venda, setMaior18Venda] = useState(false);
   const [formaVenda, setFormaVenda] = useState<string>('pix');
+  // cadastro de produto no meio da venda (produto novo que ainda não está no catálogo)
+  const [cadastro, setCadastro] = useState<null | { origem: 'comanda' | 'venda' | 'mesa' }>(null);
 
   const recarregar = useCallback(async (l: string, c: string | null) => {
     const e = await buscarEstado(l, c);
@@ -117,6 +121,37 @@ export function Bar({ locais: locaisInicial, papel, nome, deveTrocarSenha }: {
   const selecionarMesa = (m: MesaLinha) => {
     if (m.comandaId) void selecionarComanda(m.comandaId);
     else void rodar(() => abrirMesa(localId, m.id));
+  };
+
+  // Cadastro no MEIO da venda: com comanda aberta o item entra na hora e a operação segue.
+  // Sem comanda, o cadastro fica pronto e o próximo passo é abrir uma mesa.
+  const cadastrarProduto = async (p: ProdutoNovo) => {
+    if (aba === 'venda') setAba('mesas');   // a comanda é onde a venda continua
+    const comanda = estado.comandaId;
+    const tipoItem: 'copao' | 'revenda' = p.tipo === 'preparado' ? 'copao' : 'revenda';
+
+    if (comanda && (!p.adulto || maior18)) {
+      const r = await rodar(() => adicionarItem(localId, comanda, p.id, 1, tipoItem, maior18));
+      if (!r.erro) setAviso({ tipo: 'ok', texto: `"${p.nome}" cadastrado e lançado na comanda.` });
+      return;
+    }
+
+    // recarrega: o produto novo tem de aparecer no <select> antes de poder ser escolhido
+    const e = await buscarEstado(localId, comanda);
+    setEstado(e);
+    setComandaId(e.comandaId);
+    if (comanda) {
+      setProdutoId(p.id);
+      setQtd(1);
+      setAviso({
+        tipo: 'ok',
+        texto: p.adulto
+          ? `"${p.nome}" cadastrado (+18): confirme a idade do cliente e clique em Adicionar.`
+          : `"${p.nome}" cadastrado e já selecionado — clique em Adicionar.`,
+      });
+      return;
+    }
+    setAviso({ tipo: 'ok', texto: `"${p.nome}" cadastrado com saldo no local. Abra uma mesa para lançá-lo na venda.` });
   };
 
   return (
@@ -266,10 +301,21 @@ export function Bar({ locais: locaisInicial, papel, nome, deveTrocarSenha }: {
             </div>
 
             {!temComanda ? (
-              <p className="rounded-card bg-white p-6 text-center text-sm text-ink-soft" data-testid="comanda-vazia">
-                Abra uma mesa (ou uma comanda avulsa) para lançar itens.
-                {livres.length === 0 && estado.mesas.length > 0 && ' Não há mesa livre — feche ou transfira uma comanda.'}
-              </p>
+              <div className="rounded-card bg-white p-6 space-y-3 text-center" data-testid="comanda-vazia">
+                <p className="text-sm text-ink-soft">
+                  Abra uma mesa (ou uma comanda avulsa) para lançar itens.
+                  {livres.length === 0 && estado.mesas.length > 0 && ' Não há mesa livre — feche ou transfira uma comanda.'}
+                </p>
+                <button
+                  type="button"
+                  disabled={pendente}
+                  onClick={() => setCadastro({ origem: 'mesa' })}
+                  data-testid="mesas-novo-produto"
+                  className={LIMPO}
+                >
+                  + Produto novo (cadastrar sem mesa)
+                </button>
+              </div>
             ) : (
                 <Comanda
                   estado={estado} pendente={pendente} mesa={mesaDaComanda}
@@ -278,6 +324,7 @@ export function Bar({ locais: locaisInicial, papel, nome, deveTrocarSenha }: {
                 destino={destino} setDestino={setDestino} livres={livres}
                 marcados={marcados} setMarcados={setMarcados}
                 forma={forma} setForma={setForma} rodar={rodar} localId={localId}
+                onNovoProduto={() => setCadastro({ origem: 'comanda' })}
               />
             )}
           </section>
@@ -286,7 +333,18 @@ export function Bar({ locais: locaisInicial, papel, nome, deveTrocarSenha }: {
         {aba === 'venda' && (
           <section className="space-y-4" data-testid="painel-venda">
             <div className="w-full max-w-lg rounded-card bg-white p-4 space-y-3">
-              <h2 className="font-bold text-estrutura">Venda avulsa de copão</h2>
+              <div className="flex flex-wrap items-center gap-3">
+                <h2 className="font-bold text-estrutura">Venda avulsa de copão</h2>
+                <button
+                  type="button"
+                  disabled={pendente}
+                  onClick={() => setCadastro({ origem: 'venda' })}
+                  data-testid="venda-novo-produto"
+                  className={`${LIMPO} ml-auto`}
+                >
+                  + Produto novo
+                </button>
+              </div>
               <p className="text-sm text-ink-soft">
                 Sem mesa: a venda sai direto e a ficha técnica baixa o insumo no local.
               </p>
@@ -373,6 +431,15 @@ export function Bar({ locais: locaisInicial, papel, nome, deveTrocarSenha }: {
             </div>
           </section>
         )}
+
+        {cadastro && (
+          <CadastroRapidoProduto
+            localId={localId}
+            localNome={locais.find((l) => l.id === localId)?.nome ?? localId}
+            fechar={() => setCadastro(null)}
+            onCriado={cadastrarProduto}
+          />
+        )}
       </div>
     </div>
   );
@@ -422,7 +489,8 @@ function Caixa({ estado, pendente, abertura, setAbertura, comandaId, rodar }: {
 
 // ---------------------------------------------------------------- comanda
 function Comanda({ estado, pendente, mesa, produtoId, setProdutoId, qtd, setQtd, maior18, setMaior18,
-  escolhida, destino, setDestino, livres, marcados, setMarcados, forma, setForma, rodar, localId }: {
+  escolhida, destino, setDestino, livres, marcados, setMarcados, forma, setForma, rodar, localId,
+  onNovoProduto }: {
   estado: Estado; pendente: boolean; mesa: MesaLinha | null;
   produtoId: string; setProdutoId: (v: string) => void; qtd: number; setQtd: (v: number) => void;
   maior18: boolean; setMaior18: (v: boolean) => void; escolhida: Escolha | null;
@@ -430,6 +498,7 @@ function Comanda({ estado, pendente, mesa, produtoId, setProdutoId, qtd, setQtd,
   marcados: string[]; setMarcados: (v: string[]) => void;
   forma: string; setForma: (v: string) => void;
   rodar: (fn: () => Promise<Resultado>) => Promise<Resultado>; localId: string;
+  onNovoProduto: () => void;
 }) {
   const comanda = estado.comandaId;
   if (!comanda) return null;
@@ -492,7 +561,18 @@ function Comanda({ estado, pendente, mesa, produtoId, setProdutoId, qtd, setQtd,
       )}
 
       <div className="rounded-card border border-line p-3 space-y-3">
-        <h3 className="text-sm font-bold text-estrutura">Lançar item</h3>
+        <div className="flex flex-wrap items-center gap-3">
+          <h3 className="text-sm font-bold text-estrutura">Lançar item</h3>
+          <button
+            type="button"
+            disabled={pendente}
+            onClick={onNovoProduto}
+            data-testid="comanda-novo-produto"
+            className={`${LIMPO} ml-auto`}
+          >
+            + Produto novo
+          </button>
+        </div>
         <div className="flex flex-wrap items-end gap-3">
           <label className="min-w-56 flex-1 text-sm font-bold text-ink-soft">
             Produto

@@ -23,4 +23,13 @@ export function papelPodeAcessar(papel: Papel, caminho: string): boolean {
   return regra ? regra.papeis.includes(papel) : true;
 }
 
+// Destino do login quando não há `next` (pedido do cliente 2026-10-10): quem opera venda cai
+// direto no módulo, sem passar pelo painel. Ordem: PDV → bar → estoque → painel.
+export function rotaInicial(papel: Papel): string {
+  if (papelPodeAcessar(papel, '/pdv')) return '/pdv';
+  if (papelPodeAcessar(papel, '/bar')) return '/bar';
+  if (papelPodeAcessar(papel, '/estoque')) return '/estoque';
+  return '/painel';
+}
+
 export const ehPapel = (v: unknown): v is Papel => typeof v === 'string' && (PAPEIS as readonly string[]).includes(v);

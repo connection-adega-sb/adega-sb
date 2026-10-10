@@ -6,6 +6,8 @@ import {
   abrirCaixa, lancarMovimento, fecharCaixa, finalizarVendaPdv,
   type ProdutoBusca, type CaixaInfo, type ResumoCaixa, type EstadoCaixa, type ResultadoFechamento,
 } from './actions';
+import { CadastroRapidoProduto } from '@/components/CadastroRapidoProduto';
+import type { ProdutoNovo } from '@/app/produtos/actions';
 import { ROTULO_PAPEL, type Papel } from '@/lib/papeis';
 
 type Linha = { produto: ProdutoBusca; qtd: number };
@@ -39,6 +41,9 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
   const [abaCaixa, setAbaCaixa] = useState<'mov' | 'fechar'>('mov');
   const [drawer, setDrawer] = useState(false);
   const [salvando, setSalvando] = useState(false);
+
+  // cadastro de produto no meio da venda (produto novo que ainda não está no catálogo)
+  const [cadastro, setCadastro] = useState<{ prefill?: { nome?: string; codigoBarras?: string } } | null>(null);
 
   // layout: comanda inline no desktop, drawer no mobile (uma única instância no DOM)
   const [ehDesktop, setEhDesktop] = useState(true);
@@ -100,6 +105,16 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
     buscaRef.current?.focus();
   }, [aberto]);
 
+  // cadastro feito no MEIO da venda → o produto entra na comanda na hora e a operação segue
+  const aoCadastrar = useCallback((p: ProdutoNovo) => {
+    if (aberto) {
+      adicionar(p);
+      setAviso({ tipo: 'ok', texto: `"${p.nome}" cadastrado e lançado na comanda.` });
+    } else {
+      setAviso({ tipo: 'ok', texto: `"${p.nome}" cadastrado no catálogo. Abra o caixa para vendê-lo.` });
+    }
+  }, [aberto, adicionar]);
+
   // parse multiplicador "3*7898107" ou "3x cerveja" (PDV-04)
   const parseMult = (t: string): { qtd: number; resto: string } => {
     const m = t.match(/^\s*(\d{1,3})\s*[*xX]\s*(.*)$/);
@@ -121,6 +136,8 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
   // ------------------------------------------------ atalhos (§5.4)
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      // modal de cadastro aberto: ele segura o teclado (Esc fecha, nada mais dispara)
+      if (cadastro) { if (e.key === 'Escape') { e.preventDefault(); setCadastro(null); } return; }
       if (e.key === 'F2') { e.preventDefault(); buscaRef.current?.focus(); }
       else if (e.key === 'F8') { e.preventDefault(); setPainelAberto(true); }
       else if (e.key === 'F12') { e.preventDefault(); finalizar(); }
@@ -225,6 +242,15 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
                 className="w-full rounded-full border-[1.5px] border-line-input bg-white px-4 py-3 text-lg focus:outline-none focus:border-estrutura disabled:bg-fundo disabled:text-ink-soft"
               />
               <span className="hidden shrink-0 rounded-full bg-acao-100 px-3 py-1.5 text-xs font-bold text-acao-700 sm:inline">Leitor ativo · F2</span>
+              <button
+                type="button"
+                onClick={() => setCadastro({})}
+                disabled={!localAtual}
+                data-testid="pdv-novo-produto"
+                className="shrink-0 rounded-full border-[1.5px] border-acao-600 px-3 py-1.5 text-xs font-bold text-acao-600 transition-colors hover:bg-acao-100 disabled:opacity-50"
+              >
+                + Produto novo
+              </button>
             </div>
 
             {buscando && <p className="mt-2 text-xs text-ink-soft" data-testid="pdv-buscando">Buscando…</p>}
@@ -252,6 +278,28 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
                   </tbody>
                 </table>
                 <div className="border-t border-line bg-fundo px-3 py-1.5 text-xs text-ink-soft">{resultados.length} produto(s)</div>
+              </div>
+            )}
+
+            {aberto && termo.trim().length >= 2 && !buscando && resultados.length === 0 && (
+              <div
+                className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-card border border-dashed border-line-input bg-fundo px-3 py-2 text-sm"
+                data-testid="pdv-nao-achou"
+              >
+                <span className="text-ink-soft">Nenhum produto com <strong>{termo.trim()}</strong> no catálogo.</span>
+                <button
+                  type="button"
+                  data-testid="pdv-cadastrar-achado"
+                  onClick={() => {
+                    const t = termo.trim();
+                    setCadastro(/^\d{6,}$/.test(t)
+                      ? { prefill: { codigoBarras: t } }
+                      : { prefill: { nome: t } });
+                  }}
+                  className="rounded-full bg-acao-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:opacity-90"
+                >
+                  Cadastrar este produto
+                </button>
               </div>
             )}
 
@@ -390,6 +438,16 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
           aba={abaCaixa} setAba={setAbaCaixa}
           fechar={() => setPainelAberto(false)}
           aoAbrir={aoAbrir}
+        />
+      )}
+
+      {cadastro && localAtual && (
+        <CadastroRapidoProduto
+          localId={localAtual}
+          localNome={caixas.find((c) => c.id === caixaId)?.local_nome ?? localAtual}
+          prefill={cadastro.prefill}
+          fechar={() => setCadastro(null)}
+          onCriado={aoCadastrar}
         />
       )}
     </div>

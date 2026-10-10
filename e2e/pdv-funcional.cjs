@@ -265,7 +265,14 @@ let browser = null, srv = null;
     await esperaQtd(pg, 1);
     await pg.getByTestId('pdv-maior18').getByRole('checkbox').check();
     await pg.keyboard.press('F12');
-    await pg.getByTestId('pdv-aviso').filter({ hasText: 'Venda finalizada' }).waitFor({ timeout: 20000 });
+    // se não vier "Venda finalizada", diz POR QUÊ (sem aviso = a promise do finalizar rejeitou)
+    try {
+      await pg.getByTestId('pdv-aviso').filter({ hasText: 'Venda finalizada' }).waitFor({ timeout: 20000 });
+    } catch {
+      const tem = await pg.getByTestId('pdv-aviso').count();
+      throw new Error('P17 sem "Venda finalizada" — aviso na tela: '
+        + (tem ? limpa(await aviso(pg)) : '(nenhum: finalizar não retornou)'));
+    }
     await check('P17', 'venda finalizada: aviso "R$ 4,49 no PIX" e comanda zerada (FV-04)', async () =>
       limpa(await aviso(pg)).includes('Venda finalizada: R$ 4,49 no PIX') && (await qtdLinhas(pg)) === 0);
 
@@ -364,6 +371,102 @@ let browser = null, srv = null;
     await check('P27', 'mobile: fecha caixa com contado = esperado → "Caixa confere." e estado final FECHADO', async () =>
       resumoM === 'Caixa confere.' && (await status(m)) === 'FECHADO');
     await m.close();
+
+    // ------------------------------------------------ 9) login sem next + cadastro de produto NO MEIO da venda
+    // contexto separado: sem cookies, para provar que o login em si cai no módulo do papel
+    const ctx9 = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+    const p9 = await ctx9.newPage();
+    p9.on('pageerror', (e) => console.log('  [pageerror]', e.message));
+
+    await p9.goto(BASE + '/login');
+    await check('P28', 'login SEM next → entra direto no /pdv (rota inicial por papel)', async () => {
+      await p9.getByTestId('login-email').fill(EMAIL);
+      await p9.getByTestId('login-senha').fill(SENHA);
+      await p9.getByTestId('login-entrar').click();
+      await p9.waitForURL('**/pdv', { timeout: 20000 });
+      await p9.getByTestId('pdv-status').waitFor({ timeout: 15000 });
+      return true;
+    });
+
+    await abrirCaixa(p9, 200);
+    const codigoNovo = '789' + String(Date.now());
+    const nomeNovo = 'Produto Cadastro Rapido ' + String(Date.now()).slice(-6);
+
+    await check('P29', 'busca sem resultado oferece cadastro e o modal já vem com o código lido', async () => {
+      await p9.getByTestId('pdv-busca').fill(codigoNovo);
+      await p9.getByTestId('pdv-nao-achou').waitFor({ timeout: 10000 });
+      await p9.getByTestId('pdv-cadastrar-achado').click();
+      await p9.getByTestId('cadastro-modal').waitFor({ timeout: 5000 });
+      const ean = await p9.getByTestId('cadastro-ean').inputValue();
+      await p9.getByTestId('cadastro-fechar').click();
+      await p9.getByTestId('cadastro-modal').waitFor({ state: 'detached', timeout: 5000 });
+      // o mesmo modal aberto pelo botão direto, sem nada preenchido
+      await p9.getByTestId('pdv-novo-produto').click();
+      await p9.getByTestId('cadastro-modal').waitFor({ timeout: 5000 });
+      const eanVazio = await p9.getByTestId('cadastro-ean').inputValue();
+      await p9.getByTestId('cadastro-fechar').click();
+      await p9.getByTestId('cadastro-modal').waitFor({ state: 'detached', timeout: 5000 });
+      return ean === codigoNovo && eanVazio === '';
+    });
+
+    await p9.getByTestId('pdv-novo-produto').click();
+    await p9.getByTestId('cadastro-modal').waitFor({ timeout: 5000 });
+    await p9.getByTestId('cadastro-nome').fill(nomeNovo);
+    await p9.getByTestId('cadastro-ean').fill(codigoNovo);
+    await p9.getByTestId('cadastro-preco').fill('7,90');
+    await p9.getByTestId('cadastro-saldo').fill('12');
+
+    await check('P30', 'cadastrar → modal fecha e o produto ENTRA NA COMANDA sozinho (venda continua)', async () => {
+      await p9.getByTestId('cadastro-submit').click();
+      await p9.getByTestId('cadastro-modal').waitFor({ state: 'detached', timeout: 20000 });
+      // exact: o aviso de sucesso embaixo cita o mesmo nome (modo estrito pegaria os dois)
+      await p9.getByTestId('pdv-comanda').getByText(nomeNovo, { exact: true }).waitFor({ timeout: 15000 });
+      return (await qtdLinhas(p9)) === 1;
+    });
+
+    await check('P31', 'banco: produto novo com criado_por, saldo 12 no local e ENTRADA auditada (0007)', async () => {
+      const { data: prod } = await adm.from('produtos')
+        .select('id, nome, criado_por, preco_varejo, codigo_barras, ativo, tipo')
+        .eq('codigo_barras', codigoNovo).maybeSingle();
+      if (!prod) throw new Error('produto não encontrado no banco');
+      if (!prod.criado_por) throw new Error('criado_por vazio — quem cadastrou ficou perdido');
+      if (prod.nome !== nomeNovo || Number(prod.preco_varejo) !== 7.9 || prod.tipo !== 'revenda') {
+        throw new Error('campos errados: ' + JSON.stringify(prod));
+      }
+      const { data: sal } = await adm.from('estoque_saldos')
+        .select('quantidade').eq('produto_id', prod.id).eq('local_id', lojaId).maybeSingle();
+      if (Number(sal?.quantidade) !== 12) throw new Error('saldo = ' + sal?.quantidade + ' (esperado 12)');
+      const { data: movs } = await adm.from('estoque_movimentos')
+        .select('tipo, quantidade, motivo, origem_tipo, local_id').eq('produto_id', prod.id);
+      if (movs?.length !== 1 || movs[0].tipo !== 'entrada' || Number(movs[0].quantidade) !== 12
+        || movs[0].origem_tipo !== 'cadastro' || movs[0].local_id !== lojaId) {
+        throw new Error('movimento: ' + JSON.stringify(movs));
+      }
+      return true;
+    });
+
+    await check('P32', 'finaliza a venda com o produto novo e a comanda volta a zero', async () => {
+      await p9.keyboard.press('F12');
+      await p9.getByTestId('pdv-aviso').filter({ hasText: 'Venda finalizada' }).waitFor({ timeout: 20000 });
+      const a = limpa(await aviso(p9));
+      if (!a.includes('Venda finalizada: R$ 7,90 no PIX')) throw new Error('aviso: ' + a);
+      if ((await qtdLinhas(p9)) !== 0) throw new Error('comanda não zerou');
+      const { data: movs } = await adm.from('estoque_movimentos')
+        .select('tipo, quantidade').eq('origem_tipo', 'venda').order('criado_em', { ascending: false }).limit(1);
+      if (movs?.[0]?.tipo !== 'saida_venda' || Number(movs[0].quantidade) !== -1) {
+        throw new Error('último movimento: ' + JSON.stringify(movs));
+      }
+      return true;
+    });
+    try { await fecharCaixa(p9); } catch (e) { console.log('  (aviso: não consegui fechar o caixa do P32: ' + e.message + ')'); }
+
+    // Limpeza: o produto criado aqui fica com movimento de estoque (append-only), então não dá
+    // para apagar — desativa para não poluir o catálogo de demonstração do staging.
+    // Venda e movimentos permanecem: são dados reais de auditoria.
+    const { error: eLimpa } = await adm.from('produtos').update({ ativo: false }).eq('codigo_barras', codigoNovo);
+    if (eLimpa) console.log('  (aviso: não consegui desativar o produto de teste: ' + eLimpa.message + ')');
+    else console.log('  (produto de teste desativado do catálogo: ' + nomeNovo + ')');
+    await ctx9.close();
 
     console.log(`TOTAL: ${ok + falha} checks · ${ok} PASS · ${falha} FAIL`);
     if (falha) process.exitCode = 1;
