@@ -11,7 +11,7 @@ export default async function Senha() {
     <>
       <Topo nome={s.nome} papel={s.papel} />
       <main className="mx-auto max-w-md px-4 py-8">
-        <h1 className="text-2xl font-bold text-estrutura mb-4">Trocar senha</h1>
+        <h1 className="text-[21px] font-extrabold leading-tight text-estrutura lg:text-[26px] mb-4">Trocar senha</h1>
         <FormSenha />
       </main>
     </>

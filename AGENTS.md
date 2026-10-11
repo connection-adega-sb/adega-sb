@@ -1,6 +1,6 @@
 # AGENTS.md — ADEGA SB
 
-> **Doc viva.** Criado em 2026-10-08 · Última atualização: **2026-10-10 03:26** (cadastro rápido de produto no meio da venda + login no módulo do papel CONCLUÍDOS EM STAGING E PRODUÇÃO: `0007` nas duas bases, pgTAP **173/173 nas três**, `/pdv` e `/bar` validados no browser, `e2e:pdv` 32/32).
+> **Doc viva.** Criado em 2026-10-08 · Última atualização: **2026-10-10 12:05** (layout único ADEGA SB: cabeçalho ERP do protótipo em todas as telas de gestão + /estoque, /bar, painel e usuários no molde de vendas.html — PRD-layout-adega-sb.md, L1–L4 validados no navegador).
 > **Status:** Fase 0 CONCLUÍDA · Fase 1 **CONCLUÍDA EM STAGING E PRODUÇÃO** (`https://adega-sb.netlify.app`, branch `main`) · **F3 PDV + catálogo mínimo CONCLUÍDO EM STAGING E PRODUÇÃO** (release 09/10 12:49–13:06, ritual §6) · **Etapa 2 catálogo/estoque (`0004` + `/estoque`) CONCLUÍDA EM STAGING E PRODUÇÃO** (10/10 00:16) · **F4.1 bar — migration `0005` (mesas/comandas/copão) CONCLUÍDA EM STAGING E PRODUÇÃO** (10/10 00:54, ritual §6) · **`0006` (comanda_remover_item) + seed do bar (10 mesas + Caixa #02) + UI `/bar` CONCLUÍDOS EM STAGING E PRODUÇÃO** (10/10 02:30, ritual §6) · **`0007` produto_criar + cadastro rápido no meio da venda + login no módulo do papel CONCLUÍDOS EM STAGING E PRODUÇÃO** (10/10 03:26, ritual §6).
 > Leia também: `F:\Projetos\adega-sb-docs\HANDOFF-IA.md` (documento global de passagem). Toda decisão nova entra aqui **no mesmo commit** da mudança.
 
@@ -135,6 +135,19 @@ Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch padrã
 5. **Validado:** `tsc` 0 · lint 0 · build OK · `npm run e2e` **23/23** · `npm run e2e:pdv` **32/32** · no navegador os 3 modais com dado real (3 fichas de copão, 28 produtos no ar, 15 vendas / R$ 206,35 no dia). **2 gates ajustados** por causa do layout: `P16` (`'Nenhum item ainda.'` → `'Nenhum item na comanda'`) e `P26` (o botão do drawer precisa continuar condicionado a `drawer`, senão ele fica no DOM e o `waitFor({state:'detached'})` estoura).
 
 **Pegadinha desta entrega:** o E2E conta linhas com `[data-testid^="pdv-item-"]` — todo `data-testid` novo que começa com ``pdv-item-`` quebra a contagem (os meus usaram `pdv-site-item-`, `pdv-preco-item-`, `pdv-venda-`).
+
+## Layout único ADEGA SB (2026-10-10) — regra permanente
+
+1. **Pedido do cliente (10/10):** "o projeto tem que funcionar expressamente neste layout que temos aqui da ADEGA SB". Outra IA tinha criado telas novas com um cabeçalho provisório e abas em pílula laranja que não existem nos protótipos. Auditoria: `adega-sb-docs\auditoria-cisa-2026-10-10.html`; plano: `adega-sb-docs\PRD-layout-adega-sb.md`.
+2. **Contrato visual:** `/pdv` = `public/prototipos/pdv.html` (já estava). **Toda tela de gestão** = `public/prototipos/vendas.html` / `compras.html`:
+   - cabeçalho `src/components/Topo.tsx` (client): logo + `ERP · <MÓDULO> · data` + módulos do papel em pílula (ativo `bg-acao-600`) + usuário + Sair. **Não criar outro cabeçalho.**
+   - título `text-[21px] lg:text-[26px] font-extrabold` + subtítulo `" - descrição"` em `text-[14.5px] text-ink-soft`;
+   - linha de **5 cartões de KPI** (`rounded-card border-line shadow-card`, rótulo `text-[11px] font-extrabold uppercase tracking-[.1em]`), clicáveis, **com dado real**;
+   - abas/filtros em chips (ativo `bg-estrutura text-white`, inativo `bg-white border-line`);
+   - busca `rounded-full` com ícone `Icone n="busca"` à esquerda; campos `rounded-full border-line shadow-card`; tabela `shadow-card` com cabeçalho em caixa-alta `bg-fundo/70`.
+   - largura `max-w-[1440px] px-4 lg:px-8`.
+3. **Entregue (L1–L4, validado no navegador 10/10 11:19–11:58):** Topo novo · `/estoque` (KPIs: produtos no local, no mínimo, sem saldo, a receber, inventários abertos) · `/bar` (KPIs: mesas livres, ocupadas, avulsas, em aberto, vendas do dia; caixa com bolinha de status) · `/painel`, `/admin/usuarios`, `/prototipos`, `/conta/senha`. Nenhum `data-testid` removido; nenhuma action/migration alterada.
+4. **Correção junto:** contagem cega de inventário sem itens (local sem saldo) mostrava modal vazio → agora `data-testid="contagem-vazia"` com instrução de cancelar.
 
 ## Referência funcional (2026-10-07) — "o que já tínhamos"
 

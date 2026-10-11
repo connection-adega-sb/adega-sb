@@ -22,9 +22,9 @@ const FORMAS = [
   ['pix', 'Pix'], ['cartao', 'Cartão'], ['dinheiro', 'Dinheiro'], ['boleto', 'Boleto'],
 ] as const;
 
-const BTN = 'rounded-full bg-acao-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50';
-const LIMPO = 'rounded-full border-[1.5px] border-line-input bg-white px-4 py-2 text-sm font-bold transition-colors hover:bg-acao-100 disabled:cursor-not-allowed disabled:opacity-50';
-const CAMPO = 'rounded-full border-[1.5px] border-line-input bg-white px-3 py-1.5 text-sm font-bold focus:outline-none disabled:opacity-60';
+const BTN = 'rounded-full bg-acao-600 px-4 py-2 text-[13.5px] font-bold text-white shadow-acao transition-colors hover:bg-acao-700 disabled:cursor-not-allowed disabled:opacity-50';
+const LIMPO = 'rounded-full border-[1.5px] border-line bg-white px-4 py-2 text-[13.5px] font-bold text-estrutura transition-colors hover:border-estrutura disabled:cursor-not-allowed disabled:opacity-50';
+const CAMPO = 'rounded-full border border-line bg-white px-4 py-2 text-[13.5px] font-bold text-estrutura shadow-card focus:border-estrutura focus:outline-none disabled:opacity-60';
 
 type Aviso = { tipo: 'ok' | 'erro'; texto: string } | null;
 type Aba = 'mesas' | 'venda';
@@ -156,14 +156,14 @@ export function Bar({ locais: locaisInicial, papel, nome, deveTrocarSenha }: {
 
   return (
     <div className="min-h-screen bg-fundo" data-testid="bar">
-      <div className="mx-auto max-w-6xl px-4 py-6 space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-estrutura">Bar · mesas e comandas</h1>
-            <p className="text-sm text-ink-soft">{nome} · {ROTULO_PAPEL[papel]}</p>
-          </div>
+      <div className="mx-auto w-full max-w-[1440px] px-4 lg:px-8 py-6 space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <h1 className="text-[21px] font-extrabold leading-tight text-estrutura lg:text-[26px]">
+            Bar<span className="text-[14.5px] font-normal text-ink-soft"> - mesas, comandas e copão</span>
+          </h1>
+          <p className="sr-only">{nome} · {ROTULO_PAPEL[papel]}</p>
           <label className="ml-auto flex items-center gap-2">
-            <span className="text-sm font-bold text-ink-soft">Local</span>
+            <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">Local</span>
             <select
               value={localId}
               onChange={(e) => { setLocalId(e.target.value); setComandaId(null); setAviso(null); }}
@@ -190,12 +190,14 @@ export function Bar({ locais: locaisInicial, papel, nome, deveTrocarSenha }: {
           </p>
         )}
 
+        <KpisBar estado={estado} irPara={(a) => { setAba(a); setAviso(null); }} />
+
         <Caixa
           estado={estado} pendente={pendente} abertura={abertura} setAbertura={setAbertura}
           comandaId={comandaId} rodar={rodar}
         />
 
-        <nav className="flex flex-wrap gap-2" role="tablist">
+        <nav className="flex gap-2 overflow-x-auto" role="tablist">
           {([
             ['mesas', 'Mesas e comandas'],
             ['venda', 'Venda rápida'],
@@ -206,7 +208,7 @@ export function Bar({ locais: locaisInicial, papel, nome, deveTrocarSenha }: {
               aria-selected={aba === id}
               onClick={() => { setAba(id); setAviso(null); }}
               data-testid={`bar-aba-${id}`}
-              className={`rounded-full px-4 py-2 text-sm font-bold transition-colors ${aba === id ? 'bg-acao-600 text-white' : 'bg-white text-ink-soft hover:bg-acao-100'}`}
+              className={`whitespace-nowrap rounded-full border px-4 py-2 text-[13.5px] ${aba === id ? 'border-estrutura bg-estrutura font-bold text-white' : 'border-line bg-white font-semibold text-ink-soft hover:border-estrutura hover:text-estrutura'}`}
             >
               {rotulo}
             </button>
@@ -217,7 +219,7 @@ export function Bar({ locais: locaisInicial, papel, nome, deveTrocarSenha }: {
 
         {aba === 'mesas' && (
           <section className="space-y-4" data-testid="painel-mesas">
-            <div className="rounded-card bg-white p-4 space-y-3">
+            <div className="rounded-card border border-line bg-white p-4 space-y-3 shadow-card">
               <div className="flex flex-wrap items-center gap-3">
                 <h2 className="font-bold text-estrutura">Mesas</h2>
                 <span className="text-sm text-ink-soft">
@@ -290,7 +292,7 @@ export function Bar({ locais: locaisInicial, papel, nome, deveTrocarSenha }: {
                       onClick={() => void selecionarComanda(a.comandaId)}
                       data-testid="chip-avulsa"
                       className={`rounded-full px-3 py-1 text-sm font-bold ${
-                        a.comandaId === estado.comandaId ? 'bg-acao-600 text-white' : 'border-[1.5px] border-line-input bg-white hover:bg-acao-100'
+                        a.comandaId === estado.comandaId ? 'bg-acao-600 text-white' : 'border border-line bg-white hover:bg-acao-100'
                       }`}
                     >
                       Avulsa · {brl(a.total)} · {a.itens} item(ns)
@@ -446,6 +448,31 @@ export function Bar({ locais: locaisInicial, papel, nome, deveTrocarSenha }: {
 }
 
 // ---------------------------------------------------------------- caixa
+function KpisBar({ estado, irPara }: { estado: Estado; irPara: (a: Aba) => void }) {
+  const ocupadas = estado.mesas.filter((m) => m.comandaId !== null);
+  const emAberto = ocupadas.reduce((s, m) => s + m.total, 0) + estado.avulsas.reduce((s, a) => s + a.total, 0);
+  const vendido = estado.vendas.reduce((s, v) => s + v.total, 0);
+  const cards: { id: string; nome: string; valor: string; sub: string; aba: Aba }[] = [
+    { id: 'livres', nome: 'Mesas livres', valor: String(estado.mesas.length - ocupadas.length), sub: `de ${estado.mesas.length} mesas`, aba: 'mesas' },
+    { id: 'ocupadas', nome: 'Mesas ocupadas', valor: String(ocupadas.length), sub: 'com comanda aberta', aba: 'mesas' },
+    { id: 'avulsas', nome: 'Comandas avulsas', valor: String(estado.avulsas.length), sub: 'balcão do bar', aba: 'mesas' },
+    { id: 'aberto', nome: 'Em aberto', valor: brl(emAberto), sub: 'a receber nas comandas', aba: 'mesas' },
+    { id: 'vendas', nome: 'Vendas do dia', valor: brl(vendido), sub: `${estado.vendas.length} venda(s) no caixa`, aba: 'venda' },
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-5" data-testid="bar-kpis">
+      {cards.map((c) => (
+        <button key={c.id} type="button" onClick={() => irPara(c.aba)} data-testid={`bar-kpi-${c.id}`}
+          className="rounded-card border border-line bg-white p-3.5 text-left shadow-card hover:border-estrutura">
+          <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">{c.nome}</span>
+          <span className="mt-1 block text-2xl font-extrabold tabular-nums text-estrutura">{c.valor}</span>
+          <span className="block text-[12px] text-ink-soft">{c.sub}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Caixa({ estado, pendente, abertura, setAbertura, comandaId, rodar }: {
   estado: Estado; pendente: boolean; abertura: string; setAbertura: (v: string) => void;
   comandaId: string | null;
@@ -453,12 +480,12 @@ function Caixa({ estado, pendente, abertura, setAbertura, comandaId, rodar }: {
 }) {
   const { caixa } = estado;
   return (
-    <div className="rounded-card border-l-4 border-line-input bg-white p-3 text-sm" data-testid="bar-caixa">
+    <div className="rounded-card border border-line bg-white p-3 text-sm shadow-card" data-testid="bar-caixa">
       {caixa.caixaNome === null ? (
         <span className="text-ink-soft">Este local não tem caixa cadastrado.</span>
       ) : caixa.sessaoId === null ? (
         <div className="flex flex-wrap items-center gap-3">
-          <span className="font-bold text-estrutura">{caixa.caixaNome} · fechado</span>
+          <span className="flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-[.1em] text-estrutura"><span className="h-2 w-2 rounded-full bg-bad" />{caixa.caixaNome} · fechado</span>
           <label className="flex items-center gap-2">
             <span className="text-ink-soft">Abertura</span>
             <input
@@ -477,7 +504,7 @@ function Caixa({ estado, pendente, abertura, setAbertura, comandaId, rodar }: {
         </div>
       ) : (
         <span>
-          <strong className="text-estrutura">{caixa.caixaNome} · aberto</strong>
+          <strong className="inline-flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-[.1em] text-estrutura"><span className="h-2 w-2 rounded-full bg-ok" />{caixa.caixaNome} · aberto</strong>
           <span className="text-ink-soft">
             {' '}· {caixa.operador ?? 'operador'} · abertura {brl(caixa.abertura ?? 0)}
           </span>

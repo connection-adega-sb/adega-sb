@@ -143,7 +143,12 @@ async function fecharCaixa(pg) {
   const txt = await pg.getByText(/Esperado na gaveta/).innerText();
   await pg.getByTestId('pdv-valor-contado').fill(String(paraReal(txt)));
   await pg.getByTestId('pdv-fechar-submit').click();
-  await pg.getByTestId('pdv-resultado-fechamento').waitFor({ timeout: 15000 });
+  try { await pg.getByTestId('pdv-resultado-fechamento').waitFor({ timeout: 15000 }); }
+  catch (e) {
+    // mostra o motivo real (ex.: "Esta sessão é de outro operador.") em vez de só timeout
+    const motivo = (await pg.locator('[data-testid="pdv-form-fechar"] [role="alert"]').innerText().catch(() => '')).trim();
+    throw new Error('fechamento sem resultado' + (motivo ? ' — servidor respondeu: ' + motivo : '') + ' | ' + e.message.split('\n')[0]);
+  }
   const resultado = (await pg.getByTestId('pdv-resultado-fechamento').innerText()).trim();
   await pg.getByTestId('pdv-resultado-ok').click();
   await pg.waitForFunction(() => {

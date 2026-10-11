@@ -23,21 +23,21 @@ export default async function Usuarios() {
   return (
     <>
       <Topo nome={s.nome} papel={s.papel} />
-      <main className="mx-auto max-w-6xl px-4 py-8 grid gap-6 lg:grid-cols-[1fr_360px]">
+      <main className="mx-auto w-full max-w-[1440px] px-4 lg:px-8 py-6 grid gap-6 lg:grid-cols-[1fr_360px]">
         <section>
-          <h1 className="text-2xl font-bold text-estrutura mb-4">Usuários e acessos</h1>
-          <div className="overflow-x-auto rounded-card border border-line bg-white">
+          <h1 className="text-[21px] font-extrabold leading-tight text-estrutura lg:text-[26px] mb-4">Usuários<span className="text-[14.5px] font-normal text-ink-soft"> - equipe, papéis e locais</span></h1>
+          <div className="overflow-x-auto rounded-card border border-line bg-white shadow-card">
             <table className="w-full text-sm" data-testid="tabela-usuarios">
-              <thead><tr className="text-left text-xs uppercase tracking-wide text-ink-soft border-b border-line">
-                <th className="px-3 py-2">Nome</th><th className="px-3 py-2">E-mail</th><th className="px-3 py-2">Papel</th><th className="px-3 py-2">Locais</th><th className="px-3 py-2">Status</th><th /></tr></thead>
+              <thead><tr className="bg-fundo/70 text-left text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">
+                <th className="px-4 py-3">Nome</th><th className="px-4 py-3">E-mail</th><th className="px-4 py-3">Papel</th><th className="px-4 py-3">Locais</th><th className="px-4 py-3">Status</th><th /></tr></thead>
               <tbody>{(perfis ?? []).map((p) => (
                 <tr key={p.id} className="border-b border-line last:border-0">
-                  <td className="px-3 py-2 font-bold text-estrutura">{p.nome}</td>
-                  <td className="px-3 py-2">{email.get(p.id) ?? '—'}</td>
-                  <td className="px-3 py-2">{ehPapel(p.role) ? ROTULO_PAPEL[p.role] : p.role}</td>
-                  <td className="px-3 py-2">{['master', 'gerente'].includes(p.role) ? 'todos' : (vinc ?? []).filter((v) => v.profile_id === p.id).map((v) => nomeLocal.get(v.local_id)).join(', ') || '—'}</td>
-                  <td className="px-3 py-2">{p.ativo ? <span className="text-ok font-bold">ativo</span> : <span className="text-bad font-bold">inativo</span>}{p.deve_trocar_senha && <span className="block text-xs text-warn">troca de senha pendente</span>}</td>
-                  <td className="px-3 py-2 text-right">{p.id !== s.id && (
+                  <td className="px-4 py-3 font-bold text-estrutura">{p.nome}</td>
+                  <td className="px-4 py-3">{email.get(p.id) ?? '—'}</td>
+                  <td className="px-4 py-3">{ehPapel(p.role) ? ROTULO_PAPEL[p.role] : p.role}</td>
+                  <td className="px-4 py-3">{['master', 'gerente'].includes(p.role) ? 'todos' : (vinc ?? []).filter((v) => v.profile_id === p.id).map((v) => nomeLocal.get(v.local_id)).join(', ') || '—'}</td>
+                  <td className="px-4 py-3">{p.ativo ? <span className="text-ok font-bold">ativo</span> : <span className="text-bad font-bold">inativo</span>}{p.deve_trocar_senha && <span className="block text-xs text-warn">troca de senha pendente</span>}</td>
+                  <td className="px-4 py-3 text-right">{p.id !== s.id && (
                     <form action={alternarAtivo}><input type="hidden" name="id" value={p.id} />
                       <button className="rounded-full border border-line px-3 py-1 text-xs font-bold">{p.ativo ? 'Desativar' : 'Reativar'}</button></form>)}</td>
                 </tr>))}</tbody>

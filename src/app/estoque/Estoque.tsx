@@ -11,6 +11,7 @@ import {
   type EstadoTransferencia, type EstadoInventario, type EstadoFicha,
 } from './actions';
 import { ROTULO_PAPEL, type Papel } from '@/lib/papeis';
+import { Icone } from '@/components/Icone';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const num = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 3 });
@@ -50,26 +51,29 @@ export function Estoque({ locais: locaisInicial, papel, nome, deveTrocarSenha }:
 
   return (
     <div className="min-h-screen bg-fundo" data-testid="estoque">
-      <div className="mx-auto max-w-6xl px-4 py-6 space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-estrutura">Catálogo e estoque</h1>
-            <p className="text-sm text-ink-soft">{nome} · {ROTULO_PAPEL[papel]}</p>
-          </div>
+      <div className="mx-auto w-full max-w-[1440px] px-4 lg:px-8 py-6 space-y-4">
+        {/* Cabeçalho da seção — mesmo desenho da Lista de public/prototipos/vendas.html */}
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <h1 className="text-[21px] font-extrabold leading-tight text-estrutura lg:text-[26px]">
+            Estoque<span className="text-[14.5px] font-normal text-ink-soft"> - catálogo, saldos por local, transferências e inventário</span>
+          </h1>
           {locais.length > 0 && (
-            <label className="ml-auto flex items-center gap-2">
-              <span className="text-sm font-bold text-ink-soft">Local</span>
+            <label className="flex items-center gap-2">
+              <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">Local</span>
               <select
                 value={localId}
                 onChange={(e) => setLocalId(e.target.value)}
                 data-testid="estoque-local"
-                className="rounded-full border-[1.5px] border-line-input bg-white px-3 py-1.5 font-bold focus:outline-none"
+                className="rounded-full border border-line bg-white px-4 py-2 text-[13.5px] font-bold text-estrutura shadow-card focus:border-estrutura focus:outline-none"
               >
                 {locais.map((l) => <option key={l.id} value={l.id}>{l.nome} · {l.codigo}</option>)}
               </select>
             </label>
           )}
         </div>
+        <p className="sr-only">{nome} · {ROTULO_PAPEL[papel]}</p>
+
+        <Kpis localId={localId} aba={aba} irPara={trocarAba} />
 
         {deveTrocarSenha && (
           <p className="rounded-card border-l-4 border-warn bg-white p-3 text-sm">
@@ -77,7 +81,7 @@ export function Estoque({ locais: locaisInicial, papel, nome, deveTrocarSenha }:
           </p>
         )}
 
-        <nav className="flex flex-wrap gap-2" role="tablist">
+        <nav className="flex gap-2 overflow-x-auto" role="tablist">
           {([
             ['saldos', 'Saldos'],
             ['transferencias', 'Transferências'],
@@ -90,8 +94,8 @@ export function Estoque({ locais: locaisInicial, papel, nome, deveTrocarSenha }:
               aria-selected={aba === id}
               onClick={() => trocarAba(id)}
               data-testid={`aba-${id}`}
-              className={`rounded-full px-4 py-2 text-sm font-bold transition-colors ${
-                aba === id ? 'bg-acao-600 text-white' : 'bg-white text-ink-soft hover:bg-acao-100'
+              className={`whitespace-nowrap rounded-full border px-4 py-2 text-[13.5px] ${
+                aba === id ? 'border-estrutura bg-estrutura font-bold text-white' : 'border-line bg-white font-semibold text-ink-soft hover:border-estrutura hover:text-estrutura'
               }`}
             >
               {rotulo}
@@ -106,6 +110,50 @@ export function Estoque({ locais: locaisInicial, papel, nome, deveTrocarSenha }:
         {aba === 'inventario' && <AbaInventario localId={localId} locais={locais} podeAprovar={podeAprovar} setAviso={setAviso} />}
         {aba === 'fichas' && <AbaFichas localId={localId} podeAprovar={podeAprovar} setAviso={setAviso} />}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- KPIs (funil do protótipo Vendas/Compras)
+function Kpis({ localId, aba, irPara }: { localId: string; aba: Aba; irPara: (a: Aba) => void }) {
+  const [k, setK] = useState<{ produtos: number; baixo: number; zerado: number; receber: number; inventarios: number } | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    Promise.all([buscarSaldos(localId), listarTransferencias('enviada'), listarInventarios()]).then(([s, tr, inv]) => {
+      if (!vivo) return;
+      setK({
+        produtos: s.length,
+        baixo: s.filter((l) => l.quantidade > 0 && l.quantidade <= l.minimo).length,
+        zerado: s.filter((l) => l.quantidade <= 0).length,
+        receber: tr.length,
+        inventarios: inv.filter((i) => i.status === 'aberto' || i.status === 'em_revisao').length,
+      });
+    });
+    return () => { vivo = false; };
+  }, [localId, aba]);
+  const cards: { id: string; nome: string; sub: string; icone: string; valor: number | undefined; alerta?: boolean; aba: Aba }[] = [
+    { id: 'produtos', nome: 'Produtos no local', sub: 'ativos com saldo cadastrado', icone: 'pacote', valor: k?.produtos, aba: 'saldos' },
+    { id: 'baixo', nome: 'No mínimo', sub: 'repor em breve', icone: 'alerta', valor: k?.baixo, aba: 'saldos' },
+    { id: 'zerado', nome: 'Sem saldo', sub: 'não vendem neste local', icone: 'alerta', valor: k?.zerado, alerta: true, aba: 'saldos' },
+    { id: 'receber', nome: 'A receber', sub: 'transferências enviadas', icone: 'caminhao', valor: k?.receber, aba: 'transferencias' },
+    { id: 'inventarios', nome: 'Inventários abertos', sub: 'contagem ou revisão', icone: 'calculadora', valor: k?.inventarios, aba: 'inventario' },
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-5" data-testid="estoque-kpis">
+      {cards.map((c) => {
+        const ruim = c.alerta && (c.valor ?? 0) > 0;
+        return (
+          <button key={c.id} type="button" onClick={() => irPara(c.aba)} data-testid={`kpi-${c.id}`}
+            className="rounded-card border border-line bg-white p-3.5 text-left shadow-card hover:border-estrutura">
+            <span className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">{c.nome}</span>
+              <span className={ruim ? 'text-bad' : 'text-estrutura'}><Icone n={c.icone} /></span>
+            </span>
+            <span className={`mt-1 block text-2xl font-extrabold tabular-nums ${ruim ? 'text-bad' : 'text-estrutura'}`}>{c.valor ?? '…'}</span>
+            <span className="block text-[12px] text-ink-soft">{c.sub}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -126,14 +174,18 @@ function AbaSaldos({ localId }: { localId: string }) {
 
   return (
     <section className="space-y-3" data-testid="painel-saldos">
-      <div className="rounded-card bg-white p-4">
-        <input
+      <div>
+        <div className="relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-soft"><Icone n="busca" /></span>
+          <input
           value={termo}
           onChange={(e) => setTermo(e.target.value)}
-          placeholder="Filtrar por nome ou SKU…"
+          placeholder="Nome do produto ou SKU"
+          aria-label="Buscar produto"
           data-testid="saldos-busca"
-          className="w-full rounded-full border-[1.5px] border-line-input bg-white px-4 py-2.5 focus:outline-none focus:border-estrutura"
+          className="w-full rounded-full border border-line bg-white py-2.5 pl-12 pr-4 text-sm shadow-card focus:border-estrutura focus:outline-none"
         />
+        </div>
         <p className="mt-2 text-xs text-ink-soft">
           {linhas.length} produto(s) · {baixo} no mínimo ou abaixo
         </p>
@@ -144,32 +196,32 @@ function AbaSaldos({ localId }: { localId: string }) {
           Nenhum produto com saldo neste local.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-card border border-line bg-white">
-          <table className="w-full text-sm">
-            <thead className="bg-fundo text-left text-xs uppercase text-ink-soft">
+        <div className="overflow-x-auto rounded-card border border-line bg-white shadow-card">
+          <table className="w-full text-sm tabular-nums">
+            <thead className="bg-fundo/70 text-left text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">
               <tr>
-                <th className="px-3 py-2">SKU</th>
-                <th className="px-3 py-2">Produto</th>
-                <th className="px-3 py-2">Categoria</th>
-                <th className="px-3 py-2 text-right">Saldo</th>
-                <th className="px-3 py-2 text-right">Mínimo</th>
+                <th className="px-4 py-3">SKU</th>
+                <th className="px-4 py-3">Produto</th>
+                <th className="px-4 py-3">Categoria</th>
+                <th className="px-4 py-3 text-right">Saldo</th>
+                <th className="px-4 py-3 text-right">Mínimo</th>
               </tr>
             </thead>
             <tbody>
               {linhas.map((l) => (
-                <tr key={l.produtoId} className="border-t border-line">
-                  <td className="px-3 py-2 font-mono text-xs">{l.sku ?? '—'}</td>
-                  <td className="px-3 py-2">
+                <tr key={l.produtoId} className="border-t border-fundo hover:bg-fundo/40">
+                  <td className="px-4 py-3 font-mono text-xs">{l.sku ?? '—'}</td>
+                  <td className="px-4 py-3">
                     {l.nome}
                     {l.tipo === 'preparado' && <span className="ml-1 rounded bg-acao-600 px-1 text-[10px] font-bold text-white">copão</span>}
                     {l.tipo === 'insumo' && <span className="ml-1 rounded bg-estrutura px-1 text-[10px] font-bold text-white">insumo</span>}
                   </td>
-                  <td className="px-3 py-2 text-ink-soft">{l.categoria ?? '—'}</td>
+                  <td className="px-4 py-3 text-ink-soft">{l.categoria ?? '—'}</td>
                   <td className={`px-3 py-2 text-right font-bold ${l.quantidade <= l.minimo ? 'text-warn' : 'text-ink'}`}>
                     {num(l.quantidade)} {l.unidade}
                     {l.quantidade <= l.minimo && <span className="ml-1 text-xs font-normal">baixo</span>}
                   </td>
-                  <td className="px-3 py-2 text-right text-ink-soft">{num(l.minimo)}</td>
+                  <td className="px-4 py-3 text-right text-ink-soft">{num(l.minimo)}</td>
                 </tr>
               ))}
             </tbody>
@@ -245,20 +297,20 @@ function AbaTransferencias({ localId, locais, setAviso }: {
   return (
     <section className="space-y-4" data-testid="painel-transferencias">
       {/* nova transferência */}
-      <div className="rounded-card bg-white p-4 space-y-3">
+      <div className="rounded-card border border-line bg-white p-4 space-y-3 shadow-card">
         <h2 className="font-bold text-estrutura">Nova transferência</h2>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="text-sm">
-            <span className="font-bold text-ink-soft">Origem</span>
+            <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">Origem</span>
             <select value={origem} onChange={(e) => setOrigem(e.target.value)} data-testid="trans-origem"
-              className="mt-1 w-full rounded border-[1.5px] border-line-input bg-white px-3 py-2">
+              className="mt-1 w-full rounded-full border border-line bg-white px-4 py-2.5 text-sm shadow-card focus:border-estrutura focus:outline-none">
               {locais.map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
             </select>
           </label>
           <label className="text-sm">
-            <span className="font-bold text-ink-soft">Destino</span>
+            <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">Destino</span>
             <select value={destino} onChange={(e) => setDestino(e.target.value)} data-testid="trans-destino"
-              className="mt-1 w-full rounded border-[1.5px] border-line-input bg-white px-3 py-2">
+              className="mt-1 w-full rounded-full border border-line bg-white px-4 py-2.5 text-sm shadow-card focus:border-estrutura focus:outline-none">
               <option value="">Escolha…</option>
               {locais.filter((l) => l.id !== origem).map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
             </select>
@@ -266,13 +318,13 @@ function AbaTransferencias({ localId, locais, setAviso }: {
         </div>
 
         <div className="text-sm">
-          <span className="font-bold text-ink-soft">Adicionar item</span>
+          <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">Adicionar item</span>
           <input
             value={buscaItem}
             onChange={(e) => setBuscaItem(e.target.value)}
             placeholder="Buscar produto…"
             data-testid="trans-busca-item"
-            className="mt-1 w-full rounded border-[1.5px] border-line-input bg-white px-3 py-2"
+            className="mt-1 w-full rounded-full border border-line bg-white px-4 py-2.5 text-sm shadow-card focus:border-estrutura focus:outline-none"
           />
           {produtosFiltrados.length > 0 && (
             <ul className="mt-1 overflow-hidden rounded border border-line">
@@ -297,7 +349,7 @@ function AbaTransferencias({ localId, locais, setAviso }: {
                   type="number" min="0.001" step="0.001" value={it.quantidade}
                   onChange={(e) => setItens((arr) => arr.map((x) => x.produtoId === it.produtoId ? { ...x, quantidade: Number(e.target.value) } : x))}
                   data-testid={`trans-qtd-${it.produtoId}`}
-                  className="w-24 rounded border-[1.5px] border-line-input px-2 py-1 text-right"
+                  className="w-24 rounded-full border border-line px-3 py-1.5 text-right tabular-nums focus:border-estrutura focus:outline-none"
                 />
                 <button type="button" onClick={() => setItens((arr) => arr.filter((x) => x.produtoId !== it.produtoId))}
                   className="rounded-full bg-bad/10 px-2 py-1 text-xs font-bold text-bad">✕</button>
@@ -307,9 +359,9 @@ function AbaTransferencias({ localId, locais, setAviso }: {
         )}
 
         <label className="block text-sm">
-          <span className="font-bold text-ink-soft">Motivo (opcional)</span>
+          <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">Motivo (opcional)</span>
           <input value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={300}
-            className="mt-1 w-full rounded border-[1.5px] border-line-input bg-white px-3 py-2" />
+            className="mt-1 w-full rounded-full border border-line bg-white px-4 py-2.5 text-sm shadow-card focus:border-estrutura focus:outline-none" />
         </label>
 
         <form action={formTrans}>
@@ -322,11 +374,11 @@ function AbaTransferencias({ localId, locais, setAviso }: {
       </div>
 
       {/* lista */}
-      <div className="rounded-card bg-white p-4 space-y-3">
+      <div className="rounded-card border border-line bg-white p-4 space-y-3 shadow-card">
         <div className="flex items-center gap-2">
           <h2 className="font-bold text-estrutura">Transferências</h2>
           <select value={filtro} onChange={(e) => setFiltro(e.target.value)} data-testid="trans-filtro"
-            className="ml-auto rounded border-[1.5px] border-line-input bg-white px-2 py-1 text-sm">
+            className="ml-auto rounded-full border border-line shadow-card bg-white px-2 py-1 text-sm">
             <option value="">Todas</option>
             <option value="rascunho">Rascunho</option>
             <option value="enviada">Enviadas</option>
@@ -423,7 +475,7 @@ function FormRecebimento({ transferencia, formRec, onFechar }: {
                 type="number" min="0" step="0.001" value={contagens[i.produtoId] ?? 0}
                 onChange={(e) => setContagens((c) => ({ ...c, [i.produtoId]: Number(e.target.value) }))}
                 data-testid={`contagem-${i.produtoId}`}
-                className="w-24 rounded border-[1.5px] border-line-input px-2 py-1 text-right"
+                className="w-24 rounded-full border border-line px-3 py-1.5 text-right tabular-nums focus:border-estrutura focus:outline-none"
               />
             </li>
           ))}
@@ -475,12 +527,12 @@ function AbaInventario({ localId, locais, podeAprovar, setAviso }: {
 
   return (
     <section className="space-y-4" data-testid="painel-inventario">
-      <div className="rounded-card bg-white p-4 space-y-3">
+      <div className="rounded-card border border-line bg-white p-4 space-y-3 shadow-card">
         <h2 className="font-bold text-estrutura">Abrir inventário cego</h2>
         <p className="text-xs text-ink-soft">Congela a folha de contagem dos produtos com saldo ≠ 0 no local. O contador vê só o produto — nunca o saldo.</p>
         <form action={formAbrir} className="flex flex-wrap items-center gap-2">
           <select name="localId" defaultValue={localId} data-testid="inv-local"
-            className="rounded border-[1.5px] border-line-input bg-white px-3 py-2 text-sm">
+            className="rounded-full border border-line bg-white shadow-card bg-white px-3 py-2 text-sm">
             {locais.map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
           </select>
           <button data-testid="inv-abrir" className="rounded-full bg-acao-600 px-4 py-2 text-sm font-bold text-white">Abrir</button>
@@ -491,7 +543,7 @@ function AbaInventario({ localId, locais, podeAprovar, setAviso }: {
         <FormContagem inventario={contando} formContar={formContar} onFechar={() => setContando(null)} />
       )}
 
-      <div className="rounded-card bg-white p-4 space-y-3">
+      <div className="rounded-card border border-line bg-white p-4 space-y-3 shadow-card">
         <h2 className="font-bold text-estrutura">Inventários</h2>
         {lista.length === 0 ? (
           <p className="py-6 text-center text-sm text-ink-soft" data-testid="inv-vazio">Nenhum inventário.</p>
@@ -532,7 +584,7 @@ function AbaInventario({ localId, locais, podeAprovar, setAviso }: {
                     <form action={formCancelar} className="flex items-center gap-1">
                       <input type="hidden" name="id" value={inv.id} />
                       <input name="motivo" placeholder="Motivo" required
-                        className="w-32 rounded border-[1.5px] border-line-input px-2 py-1 text-xs" />
+                        className="w-32 rounded-full border border-line shadow-card px-2 py-1 text-xs" />
                       <button data-testid={`cancelar-inv-${inv.id}`} className="rounded-full bg-bad/10 px-3 py-1 text-xs font-bold text-bad">Cancelar</button>
                     </form>
                   )}
@@ -567,6 +619,11 @@ function FormContagem({ inventario, formContar, onFechar }: {
           <button onClick={onFechar} className="ml-auto text-ink-soft" aria-label="Fechar">✕</button>
         </div>
         <p className="text-xs text-ink-soft">Digite a quantidade contada. O saldo fica oculto até o fechamento.</p>
+        {inventario.itens.length === 0 && (
+          <p className="rounded-card bg-fundo p-3 text-sm text-ink-soft" data-testid="contagem-vazia">
+            Nenhum produto com saldo neste local — não há o que contar. Cancele este inventário.
+          </p>
+        )}
         <ul className="max-h-72 space-y-2 overflow-y-auto">
           {inventario.itens.map((i) => (
             <li key={i.produtoId} className="flex items-center gap-2 text-sm">
@@ -575,7 +632,7 @@ function FormContagem({ inventario, formContar, onFechar }: {
                 type="number" min="0" step="0.001" value={contados[i.produtoId] ?? 0}
                 onChange={(e) => setContados((c) => ({ ...c, [i.produtoId]: Number(e.target.value) }))}
                 data-testid={`contado-${i.produtoId}`}
-                className="w-24 rounded border-[1.5px] border-line-input px-2 py-1 text-right"
+                className="w-24 rounded-full border border-line px-3 py-1.5 text-right tabular-nums focus:border-estrutura focus:outline-none"
               />
             </li>
           ))}
@@ -661,12 +718,12 @@ function AbaFichas({ localId, podeAprovar, setAviso }: {
       </div>
 
       {/* editar ficha */}
-      <div className="rounded-card bg-white p-4 space-y-3">
+      <div className="rounded-card border border-line bg-white p-4 space-y-3 shadow-card">
         <h2 className="font-bold text-estrutura">Ficha técnica do copão</h2>
         <label className="block text-sm">
-          <span className="font-bold text-ink-soft">Produto (copão)</span>
+          <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">Produto (copão)</span>
           <select value={produtoId} onChange={(e) => setProdutoId(e.target.value)} data-testid="ficha-produto"
-            className="mt-1 w-full rounded border-[1.5px] border-line-input bg-white px-3 py-2">
+            className="mt-1 w-full rounded-full border border-line bg-white px-4 py-2.5 text-sm shadow-card focus:border-estrutura focus:outline-none">
             <option value="">Escolha o copão…</option>
             {preparados.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
           </select>
@@ -676,26 +733,26 @@ function AbaFichas({ localId, podeAprovar, setAviso }: {
           <>
             <div className="grid gap-3 sm:grid-cols-3">
               <label className="text-sm">
-                <span className="font-bold text-ink-soft">Markup</span>
+                <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">Markup</span>
                 <input type="number" min="0.1" step="0.1" value={markup} onChange={(e) => setMarkup(Number(e.target.value))}
                   data-testid="ficha-markup"
-                  className="mt-1 w-full rounded border-[1.5px] border-line-input px-3 py-2" />
+                  className="mt-1 w-full rounded-full border border-line shadow-card px-3 py-2" />
               </label>
               <div className="text-sm">
-                <span className="font-bold text-ink-soft">CMV</span>
+                <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">CMV</span>
                 <p className="mt-1 text-lg font-bold" data-testid="ficha-cmv">{ficha?.cmv != null ? brl(ficha.cmv) : '—'}</p>
               </div>
               <div className="text-sm">
-                <span className="font-bold text-ink-soft">Preço no PDV</span>
+                <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">Preço no PDV</span>
                 <p className="mt-1 text-lg font-bold" data-testid="ficha-preco">{ficha?.preco != null ? brl(ficha.preco) : '—'}</p>
               </div>
             </div>
 
             <div className="text-sm">
-              <span className="font-bold text-ink-soft">Insumos (dose por copo)</span>
+              <span className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">Insumos (dose por copo)</span>
               <input value={buscaIns} onChange={(e) => setBuscaIns(e.target.value)} placeholder="Buscar insumo…"
                 data-testid="ficha-busca-insumo"
-                className="mt-1 w-full rounded border-[1.5px] border-line-input bg-white px-3 py-2" />
+                className="mt-1 w-full rounded-full border border-line bg-white px-4 py-2.5 text-sm shadow-card focus:border-estrutura focus:outline-none" />
               {insumosIns.length > 0 && (
                 <ul className="mt-1 overflow-hidden rounded border border-line">
                   {insumosIns.map((p) => (
@@ -719,10 +776,10 @@ function AbaFichas({ localId, podeAprovar, setAviso }: {
                     <input type="number" min="0.001" step="0.001" value={ins.quantidade}
                       onChange={(e) => setInsumos((arr) => arr.map((x) => x.produtoId === ins.produtoId ? { ...x, quantidade: Number(e.target.value) } : x))}
                       data-testid={`insumo-qtd-${ins.produtoId}`}
-                      className="w-24 rounded border-[1.5px] border-line-input px-2 py-1 text-right" />
+                      className="w-24 rounded-full border border-line px-3 py-1.5 text-right tabular-nums focus:border-estrutura focus:outline-none" />
                     <select value={ins.unidade}
                       onChange={(e) => setInsumos((arr) => arr.map((x) => x.produtoId === ins.produtoId ? { ...x, unidade: e.target.value } : x))}
-                      className="rounded border-[1.5px] border-line-input px-2 py-1">
+                      className="rounded-full border border-line bg-white shadow-card px-2 py-1">
                       <option value="ml">ml</option><option value="g">g</option><option value="un">un</option>
                     </select>
                     <button type="button" onClick={() => setInsumos((arr) => arr.filter((x) => x.produtoId !== ins.produtoId))}

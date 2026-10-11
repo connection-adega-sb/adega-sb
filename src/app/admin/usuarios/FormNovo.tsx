@@ -7,7 +7,7 @@ export function FormNovo({ locais }: { locais: { id: string; nome: string }[] })
   const [e, acao, pend] = useActionState<EstadoNovo, FormData>(criarUsuario, {});
   const campo = 'mt-1 w-full rounded-xl border-[1.5px] border-line-input bg-white px-3 py-2';
   return (
-    <form action={acao} className="rounded-card border border-line bg-white p-5 space-y-3" data-testid="form-novo-usuario">
+    <form action={acao} className="rounded-card border border-line bg-white p-5 space-y-3 shadow-card" data-testid="form-novo-usuario">
       <h2 className="text-lg font-bold text-estrutura">Novo usuário</h2>
       <label className="block text-sm font-bold text-estrutura">Nome<input name="nome" className={campo} /></label>
       <label className="block text-sm font-bold text-estrutura">E-mail<input name="email" type="email" className={campo} /></label>

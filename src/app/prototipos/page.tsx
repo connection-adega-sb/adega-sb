@@ -19,14 +19,14 @@ export default async function Prototipos() {
   return (
     <>
       <Topo nome={s.nome} papel={s.papel} />
-      <main className="mx-auto max-w-6xl px-4 py-8 space-y-6">
+      <main className="mx-auto w-full max-w-[1440px] px-4 lg:px-8 py-6 space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-estrutura">Protótipos</h1>
+          <h1 className="text-[21px] font-extrabold leading-tight text-estrutura lg:text-[26px]">Protótipos<span className="text-[14.5px] font-normal text-ink-soft"> - telas de referência aprovadas</span></h1>
           <p className="text-ink-soft mt-1 max-w-3xl">Telas de referência aprovadas. <strong>Não são o sistema real:</strong> os dados ficam só neste navegador, sem banco. Cada protótipo vira módulo real na fase indicada.</p>
         </div>
         <section className="grid gap-4 sm:grid-cols-2" data-testid="lista-prototipos">
           {ITENS.map((p) => (
-            <a key={p.href} href={p.href} target="_blank" rel="noopener" className="rounded-card border border-line bg-white p-5 hover:shadow-lg transition-shadow">
+            <a key={p.href} href={p.href} target="_blank" rel="noopener" className="rounded-card border border-line bg-white p-5 shadow-card hover:border-estrutura transition-colors">
               <p className="text-xs font-extrabold uppercase tracking-widest text-acao-600">Protótipo · {p.fase}</p>
               <h2 className="text-xl font-bold text-estrutura mt-1">{p.nome} ↗</h2>
               <p className="text-sm text-ink-soft mt-1">{p.desc}</p>
