@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useActionState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import {
   buscarProdutos, sessaoAtual, ultimoTurno,
   abrirCaixa, lancarMovimento, fecharCaixa, finalizarVendaPdv,
@@ -240,6 +241,8 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
         <p className="rounded-card border-l-4 border-warn bg-white p-4 text-sm">
           <strong>Troque sua senha</strong> antes de usar o PDV.
         </p>
+        <Link href="/conta/senha" data-testid="pdv-trocar-senha"
+          className="mt-4 inline-block rounded-full bg-acao-600 px-5 py-3 font-bold text-white">Trocar senha agora</Link>
       </main>
     );
   }

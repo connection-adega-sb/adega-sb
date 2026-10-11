@@ -75,7 +75,7 @@ export function Produtos({ papel, locais, deveTrocarSenha }: {
         </div>
 
         {deveTrocarSenha && (
-          <p className="rounded-card border-l-4 border-warn bg-white p-3 text-sm"><strong>Troque sua senha</strong> antes de cadastrar produtos.</p>
+          <p className="rounded-card border-l-4 border-warn bg-white p-3 text-sm"><strong>Troque sua senha</strong> antes de cadastrar produtos. <a href="/conta/senha" className="font-bold underline">Trocar agora</a></p>
         )}
         {!locais.length && (
           <p className="rounded-card border-l-4 border-warn bg-white p-3 text-sm">Seu usuário não tem local vinculado: peça ao master para vincular a loja, o bar ou o depósito.</p>

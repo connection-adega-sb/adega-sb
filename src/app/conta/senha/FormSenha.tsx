@@ -3,9 +3,14 @@ import Link from 'next/link';
 import { useActionState } from 'react';
 import { trocarSenha, type EstadoSenha } from './actions';
 
-export function FormSenha() {
+export function FormSenha({ inicio = '/painel' }: { inicio?: string }) {
   const [e, acao, pend] = useActionState<EstadoSenha, FormData>(trocarSenha, {});
-  if (e.ok) return <p className="font-bold text-ok">Senha trocada. <Link href="/painel" className="underline">Voltar ao painel</Link></p>;
+  if (e.ok) return (
+    <div className="space-y-3" data-testid="senha-trocada">
+      <p className="font-bold text-ok">Senha trocada.</p>
+      <Link href={inicio} className="inline-block rounded-full bg-acao-600 px-5 py-3 font-bold text-white">Continuar</Link>
+    </div>
+  );
   const campo = 'mt-1 w-full rounded-xl border-[1.5px] border-line-input bg-white px-3.5 py-2.5';
   return (
     <form action={acao} className="space-y-4">

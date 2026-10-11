@@ -28,14 +28,19 @@ export async function entrar(_: EstadoLogin, form: FormData): Promise<EstadoLogi
   // Sem `next` explícito, entra direto no módulo do papel (caixa/gerente → PDV, bartender → bar,
   // estoquista → estoque). O papel é lido pelo admin: dentro do mesmo request o cookie de sessão
   // ainda não devolve a policy "profiles_le_proprio".
-  const destino = destinoSeguro(dados.data.next);
-  if (destino) redirect(destino);
   const uid = data.user?.id;
   let papel: unknown = null;
+  let trocar = false;
   if (uid) {
-    const { data: perfil } = await supabaseAdmin().from('profiles').select('role').eq('id', uid).maybeSingle();
+    const { data: perfil } = await supabaseAdmin().from('profiles').select('role, deve_trocar_senha').eq('id', uid).maybeSingle();
     papel = perfil?.role;
+    trocar = !!perfil?.deve_trocar_senha;
   }
+  // 1º acesso (ou senha redefinida pelo master): vai direto para a troca — sem isso o PDV só
+  // mostrava "Troque sua senha" sem caminho para trocar (11/10, usuário pdv@).
+  if (trocar) redirect('/conta/senha');
+  const destino = destinoSeguro(dados.data.next);
+  if (destino) redirect(destino);
   redirect(ehPapel(papel) ? rotaInicial(papel) : '/painel');
 }
 

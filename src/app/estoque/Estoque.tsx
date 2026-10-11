@@ -77,7 +77,7 @@ export function Estoque({ locais: locaisInicial, papel, nome, deveTrocarSenha }:
 
         {deveTrocarSenha && (
           <p className="rounded-card border-l-4 border-warn bg-white p-3 text-sm">
-            <strong>Troque sua senha.</strong> A senha inicial expira no primeiro acesso.
+            <strong>Troque sua senha.</strong> A senha inicial expira no primeiro acesso. <a href="/conta/senha" className="font-bold underline">Trocar agora</a>
           </p>
         )}
 
