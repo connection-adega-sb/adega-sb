@@ -463,6 +463,61 @@ let browser = null, srv = null;
       }
       return true;
     });
+
+    // ------------------------------------------------ 10) cliente identificado na venda (0008 · PRD-clientes.md)
+    const foneCli = '119' + String(Date.now()).slice(-8);              // 11 dígitos, único por execução
+    const nomeCli = 'Cliente E2E ' + foneCli.slice(-4);
+    let clienteId = null;
+    await check('P33', 'F4 abre "Identificar cliente"; telefone novo → cadastra na hora e volta para a venda', async () => {
+      await p9.keyboard.press('F4');
+      await p9.getByTestId('cliente-seletor').waitFor({ timeout: 5000 });
+      await p9.getByTestId('cliente-busca').fill(foneCli);
+      await p9.getByTestId('cliente-nenhum').waitFor({ timeout: 10000 });
+      await p9.getByTestId('cliente-novo').click();
+      if ((await p9.getByTestId('cliente-telefone').inputValue()) !== foneCli) throw new Error('telefone não veio preenchido');
+      await p9.getByTestId('cliente-nome').fill(nomeCli);
+      await p9.getByTestId('cliente-salvar').click();
+      await p9.getByTestId('cliente-seletor').waitFor({ state: 'detached', timeout: 15000 });
+      return (await p9.getByTestId('pdv-cliente-nome').innerText()).trim() === nomeCli;
+    });
+    await check('P34', 'venda com cliente: aviso cita o cliente e vendas.cliente_id gravado no banco', async () => {
+      await digitar(p9, '7898107'); await p9.getByTestId('pdv-busca').press('Enter');
+      await p9.waitForFunction(() => document.querySelectorAll('[data-testid^="pdv-item-"]').length > 0, undefined, { timeout: 15000 });
+      // cerveja é +18 (DL-12): sem marcar, o F12 recusa — mesma regra do P15
+      const conf18 = p9.getByTestId('pdv-maior18').locator('input');
+      if (await conf18.count()) await conf18.check();
+      await p9.keyboard.press('F12');
+      await p9.getByTestId('pdv-aviso').filter({ hasText: nomeCli }).waitFor({ timeout: 20000 });
+      const { data: cli } = await adm.from('clientes').select('id, telefone, criado_por').eq('telefone', foneCli).single();
+      clienteId = cli.id;
+      if (!cli.criado_por) throw new Error('criado_por vazio');
+      const { data: v } = await adm.from('vendas').select('cliente_id, total').order('criado_em', { ascending: false }).limit(1).single();
+      if (v.cliente_id !== cli.id) throw new Error('última venda sem o cliente: ' + JSON.stringify(v));
+      return (await p9.getByTestId('pdv-cliente-btn').isVisible());   // comanda zerou → cliente sai junto
+    });
+    await check('P35', 'telefone já cadastrado é recusado com o nome de quem já usa', async () => {
+      await p9.keyboard.press('F4');
+      await p9.getByTestId('cliente-seletor').waitFor({ timeout: 5000 });
+      await p9.getByTestId('cliente-novo').click();
+      await p9.getByTestId('cliente-nome').fill('Outro Nome E2E');
+      await p9.getByTestId('cliente-telefone').fill(foneCli);
+      await p9.getByTestId('cliente-salvar').click();
+      await p9.getByTestId('cliente-erro').filter({ hasText: 'Este telefone já é de ' + nomeCli }).waitFor({ timeout: 15000 });
+      await p9.keyboard.press('Escape');
+      await p9.getByTestId('cliente-seletor').waitFor({ state: 'detached', timeout: 5000 });
+      return true;
+    });
+    await check('P36', '/clientes: busca pelo telefone acha o cliente com 1 compra', async () => {
+      const pc = await ctx9.newPage();
+      await pc.goto(BASE + '/clientes');
+      await pc.getByTestId('clientes-busca').fill(foneCli);
+      const linha = pc.getByTestId('clientes-linha').filter({ hasText: nomeCli });
+      await linha.waitFor({ timeout: 15000 });
+      const compras = (await linha.locator('td').nth(3).innerText()).trim();   // coluna "Compras"
+      await pc.close();
+      if (compras !== '1') throw new Error('compras = ' + compras);
+      return true;
+    });
     try { await fecharCaixa(p9); } catch (e) { console.log('  (aviso: não consegui fechar o caixa do P32: ' + e.message + ')'); }
 
     // Limpeza: o produto criado aqui fica com movimento de estoque (append-only), então não dá
@@ -471,6 +526,14 @@ let browser = null, srv = null;
     const { error: eLimpa } = await adm.from('produtos').update({ ativo: false }).eq('codigo_barras', codigoNovo);
     if (eLimpa) console.log('  (aviso: não consegui desativar o produto de teste: ' + eLimpa.message + ')');
     else console.log('  (produto de teste desativado do catálogo: ' + nomeNovo + ')');
+    // clientes de teste (esta execução e sobras de execuções que falharam no meio): desativa.
+    // Vendas ligadas a eles são auditoria e ficam; o cadastro some da lista de ativos.
+    {
+      const { data: des, error: eCli } = await adm.from('clientes').update({ ativo: false })
+        .like('nome', 'Cliente E2E %').eq('ativo', true).select('id');
+      console.log(eCli ? '  (aviso: não consegui desativar clientes de teste: ' + eCli.message + ')'
+        : '  (clientes de teste desativados: ' + (des?.length ?? 0) + (clienteId ? '' : ' · P34 não gravou o cliente') + ')');
+    }
     await ctx9.close();
 
     console.log(`TOTAL: ${ok + falha} checks · ${ok} PASS · ${falha} FAIL`);

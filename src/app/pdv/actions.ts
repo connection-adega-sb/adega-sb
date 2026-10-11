@@ -261,13 +261,14 @@ const Finalizar = z.object({
   desconto: z.coerce.number().min(0).default(0),
   forma: z.enum(['pix', 'cartao', 'dinheiro']),
   maior18: z.boolean().default(false),
+  clienteId: UUID.nullable().default(null),   // opcional (0008): cliente identificado na venda
 });
 
 export type ResultadoVenda = { erro?: string; total?: number; forma?: string };
 
 export async function finalizarVendaPdv(dados: {
   sessaoId: string; itens: { produto_id: string; quantidade: number }[];
-  desconto?: number; forma: 'pix' | 'cartao' | 'dinheiro'; maior18?: boolean;
+  desconto?: number; forma: 'pix' | 'cartao' | 'dinheiro'; maior18?: boolean; clienteId?: string | null;
 }): Promise<ResultadoVenda> {
   const s = await exigirSessao(['master', 'gerente', 'caixa']);
   const p = Finalizar.safeParse(dados);
@@ -280,15 +281,17 @@ export async function finalizarVendaPdv(dados: {
   if (sess.status !== 'aberta') return { erro: 'Abra o caixa para vender.' };
   if (sess.operador_id !== s.id && s.papel !== 'master') return { erro: 'Esta sessão é de outro operador.' };
 
-  // FV-03: transação única no banco (venda + itens + movimentos + baixa de estoque)
-  const { data, error } = await sb.rpc('finalizar_venda_pdv', {
+  // FV-03: transação única no banco (venda + itens + movimentos + baixa de estoque).
+  // 0008: a mesma venda passa por finalizar_venda_pdv_cliente, que valida o cliente (ativo, mesmo
+  // tenant), grava vendas.cliente_id e leva o CPF do cadastro para vendas.cpf — tudo na mesma transação.
+  const { data, error } = await sb.rpc('finalizar_venda_pdv_cliente', {
     p_caixa_sessao_id: p.data.sessaoId,
     p_forma_pagamento: p.data.forma,
     p_produtos: p.data.itens.map((i) => i.produto_id),
     p_quantidades: p.data.itens.map((i) => i.quantidade),
     p_desconto: p.data.desconto,
-    p_cpf: null,
     p_maior18: p.data.maior18,
+    p_cliente: p.data.clienteId,
   });
   if (error) return { erro: traduzErro(error.message) };
 
@@ -298,6 +301,7 @@ export async function finalizarVendaPdv(dados: {
 }
 
 function traduzErro(msg: string): string {
+  if (msg.includes('cliente não encontrado')) return 'Cliente não encontrado ou desativado. Identifique de novo.';
   if (msg.includes('18')) return 'Item +18: confirme que o cliente é maior de 18 anos.';
   if (msg.includes('saldo insuficiente')) return 'Estoque insuficiente para um dos itens.';
   if (msg.includes('caixa fechado')) return 'Abra o caixa para vender.';

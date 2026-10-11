@@ -8,6 +8,9 @@ import {
   type ProdutoBusca, type CaixaInfo, type ResumoCaixa, type EstadoCaixa, type ResultadoFechamento,
 } from './actions';
 import { CadastroRapidoProduto } from '@/components/CadastroRapidoProduto';
+import { ClienteSeletor } from '@/components/ClienteSeletor';
+import type { Cliente } from '@/app/clientes/actions';
+import { fone as fmtFone } from '@/lib/formatar';
 import { PrecificacaoModal } from '@/components/PrecificacaoModal';
 import { SiteLojaModal } from '@/components/SiteLojaModal';
 import { VendasDiaModal } from '@/components/VendasDiaModal';
@@ -33,6 +36,9 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
   const [desconto, setDesconto] = useState(0);
   const [forma, setForma] = useState<'pix' | 'cartao' | 'dinheiro'>('pix');
   const [maior18, setMaior18] = useState(false);
+  // cliente identificado (opcional — 0008); F4 abre o seletor
+  const [cliente, setCliente] = useState<Cliente | null>(null);
+  const [seletorCliente, setSeletorCliente] = useState(false);
   const [aviso, setAviso] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
 
   // busca
@@ -151,11 +157,14 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
     const h = (e: KeyboardEvent) => {
       // modal de cadastro aberto: ele segura o teclado (Esc fecha, nada mais dispara)
       if (cadastro) { if (e.key === 'Escape') { e.preventDefault(); setCadastro(null); } return; }
+      // seletor de cliente aberto: ele segura o teclado (Esc fecha nele mesmo)
+      if (seletorCliente) return;
       // módulos do topo abertos: cada um fecha sozinho no Esc (senão o Esc limparia a busca)
       if (precoAberto || siteAberto || vendasAberta) return;
       if (e.key === 'F2') { e.preventDefault(); buscaRef.current?.focus(); }
       else if (e.key === 'F8') { e.preventDefault(); setPainelAberto(true); }
       else if (e.key === 'F9') { e.preventDefault(); setVendasAberta(true); }
+      else if (e.key === 'F4') { e.preventDefault(); if (aberto) setSeletorCliente(true); }
       else if (e.key === 'F12') { e.preventDefault(); finalizar(); }
       else if (e.key === 'Escape') {
         if (painelAberto) setPainelAberto(false);
@@ -172,7 +181,7 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
       l.produto.id === id ? (l.qtd + delta < 1 ? [] : [{ ...l, qtd: l.qtd + delta }]) : [l]));
 
   const remover = (id: string) => setLinhas((prev) => prev.filter((l) => l.produto.id !== id));
-  const limparItens = () => { setLinhas([]); setDesconto(0); setMaior18(false); };
+  const limparItens = () => { setLinhas([]); setDesconto(0); setMaior18(false); setCliente(null); };
   const limpar = () => { limparItens(); setAviso(null); };
 
   const subtotal = linhas.reduce((s, l) => s + l.produto.preco_varejo * l.qtd, 0);
@@ -191,13 +200,14 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
     const r = await finalizarVendaPdv({
       sessaoId: sessao.sessaoId,
       itens: linhas.map((l) => ({ produto_id: l.produto.id, quantidade: l.qtd })),
-      desconto, forma, maior18,
+      desconto, forma, maior18, clienteId: cliente?.id ?? null,
     });
     setSalvando(false);
     if (r.erro) { setAviso({ tipo: 'erro', texto: r.erro }); return; }
     // zera a comanda SEM apagar o aviso de sucesso (FV-04) — ordem importava
+    const quem = cliente ? ` · ${cliente.nome}` : '';
     limparItens();
-    setAviso({ tipo: 'ok', texto: `Venda finalizada: ${brl(total)} no ${forma.toUpperCase()}` });
+    setAviso({ tipo: 'ok', texto: `Venda finalizada: ${brl(total)} no ${forma.toUpperCase()}${quem}` });
     await recarregar(caixaId);
     buscaRef.current?.focus();
   }
@@ -511,6 +521,25 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
 
             {/* ------------------------------------------------ fechamento da venda */}
             <div className="shrink-0 space-y-4 border-t border-line bg-fundo/40 p-4">
+              {/* cliente (opcional — 0008): identifica para histórico e CPF na nota */}
+              {cliente ? (
+                <div className="flex items-center justify-between gap-2 rounded-card border border-line bg-white px-3 py-2" data-testid="pdv-cliente">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Icone n="usuario" className="h-4 w-4 shrink-0 text-estrutura" />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-bold text-estrutura" data-testid="pdv-cliente-nome">{cliente.nome}</span>
+                      {cliente.telefone && <span className="block text-xs text-ink-soft">{fmtFone(cliente.telefone)}</span>}
+                    </span>
+                  </span>
+                  <button type="button" onClick={() => setCliente(null)} data-testid="pdv-cliente-remover" aria-label="Tirar cliente da venda"
+                    className="p-1 text-ink-soft hover:text-bad"><Icone n="fechar" className="h-4 w-4" /></button>
+                </div>
+              ) : (
+                <button type="button" onClick={() => setSeletorCliente(true)} disabled={!aberto} data-testid="pdv-cliente-btn"
+                  className="flex w-full items-center justify-center gap-2 rounded-full border border-dashed border-line-input bg-white px-4 py-2 text-[13px] font-bold text-ink-soft hover:border-estrutura hover:text-estrutura disabled:opacity-50">
+                  <Icone n="usuario" className="h-4 w-4" />Identificar cliente <span className="font-semibold opacity-70">(F4 · opcional)</span>
+                </button>
+              )}
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between text-ink-soft">
                   <span>Subtotal</span><span className="tabular-nums">{brl(subtotal)}</span>
@@ -598,6 +627,10 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
       {drawer && !ehDesktop && (
         <div className="fixed inset-0 z-40 bg-estrutura/60" data-testid="pdv-drawer-fundo"
           onClick={() => setDrawer(false)} />
+      )}
+
+      {seletorCliente && (
+        <ClienteSeletor fechar={() => { setSeletorCliente(false); buscaRef.current?.focus(); }} onEscolher={setCliente} />
       )}
 
       {painelAberto && (

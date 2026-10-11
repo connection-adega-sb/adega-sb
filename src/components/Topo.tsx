@@ -13,6 +13,7 @@ const MODULOS: { rota: string; rotulo: string }[] = [
   { rota: '/pdv', rotulo: 'PDV' },
   { rota: '/bar', rotulo: 'Bar' },
   { rota: '/estoque', rotulo: 'Estoque' },
+  { rota: '/clientes', rotulo: 'Clientes' },
   { rota: '/admin/usuarios', rotulo: 'Usuários' },
   { rota: '/prototipos', rotulo: 'Protótipos' },
 ];
