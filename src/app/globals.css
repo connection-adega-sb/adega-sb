@@ -33,3 +33,11 @@
 html { color-scheme: light; }
 body { background: var(--color-fundo); color: var(--color-ink); font-family: var(--font-sans); }
 :focus-visible { outline: 3px solid var(--color-acao-600); outline-offset: 2px; }
+
+/* Impressão do comprovante do PDV (ReciboVenda): só o papel, em largura de bobina de 80 mm */
+@media print {
+  body * { visibility: hidden; }
+  .imprimivel, .imprimivel * { visibility: visible; }
+  .imprimivel { position: absolute; left: 0; top: 0; width: 80mm; max-width: 80mm; box-shadow: none; padding: 0; }
+  @page { size: 80mm auto; margin: 3mm; }
+}

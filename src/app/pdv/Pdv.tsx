@@ -10,6 +10,8 @@ import {
 } from './actions';
 import { CadastroRapidoProduto } from '@/components/CadastroRapidoProduto';
 import { ClienteSeletor } from '@/components/ClienteSeletor';
+import { CpfNotaModal } from '@/components/CpfNotaModal';
+import { ReciboVenda, type ReciboDados } from '@/components/ReciboVenda';
 import { creditoCliente, type Cliente, type CreditoCliente } from '@/app/clientes/actions';
 import { fone as fmtFone } from '@/lib/formatar';
 import { PrecificacaoModal } from '@/components/PrecificacaoModal';
@@ -40,6 +42,9 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
   // cliente identificado (opcional — 0008); F4 abre o seletor
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [seletorCliente, setSeletorCliente] = useState(false);
+  // F12 → "CPF na nota?" → venda → comprovante/recibo (fluxo do protótipo pdv.html, sem NFC-e até a F10)
+  const [cpfModal, setCpfModal] = useState(false);
+  const [recibo, setRecibo] = useState<ReciboDados | null>(null);
   // "Crédito" (0009): conta do cliente — saldo em aberto e limite aparecem na comanda
   const [credito, setCredito] = useState<CreditoCliente | null>(null);
   useEffect(() => {
@@ -168,6 +173,8 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
       if (cadastro) { if (e.key === 'Escape') { e.preventDefault(); setCadastro(null); } return; }
       // seletor de cliente aberto: ele segura o teclado (Esc fecha nele mesmo)
       if (seletorCliente) return;
+      // "CPF na nota?" e comprovante seguram o teclado (Enter/Esc tratados neles)
+      if (cpfModal || recibo) return;
       // módulos do topo abertos: cada um fecha sozinho no Esc (senão o Esc limparia a busca)
       if (precoAberto || siteAberto || vendasAberta) return;
       if (e.key === 'F2') { e.preventDefault(); buscaRef.current?.focus(); }
@@ -217,21 +224,38 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
       setSeletorCliente(true);
       return;
     }
+    setAviso(null);
+    setCpfModal(true);   // última pergunta antes de gravar: "CPF na nota?"
+  }
+
+  async function confirmarVenda(cpf: string | null) {
+    if (!aberto || !sessao || salvando) return;
     setSalvando(true); setAviso(null);
     const r = await finalizarVendaPdv({
       sessaoId: sessao.sessaoId,
       itens: linhas.map((l) => ({ produto_id: l.produto.id, quantidade: l.qtd })),
-      desconto, forma, maior18, clienteId: cliente?.id ?? null,
+      desconto, forma, maior18, clienteId: cliente?.id ?? null, cpf,
     });
     setSalvando(false);
-    if (r.erro) { setAviso({ tipo: 'erro', texto: r.erro }); return; }
+    setCpfModal(false);
+    if (r.erro) { setAviso({ tipo: 'erro', texto: r.erro }); buscaRef.current?.focus(); return; }
+    // foto da venda para o comprovante ANTES de zerar a comanda
+    const dados: ReciboDados = {
+      vendaId: r.vendaId ?? '', quando: r.quando ?? new Date().toISOString(),
+      operador: sessao.operador || nome, caixa: nomeCaixa,
+      itens: linhas.map((l) => ({ nome: l.produto.nome, qtd: l.qtd, preco: l.produto.preco_varejo })),
+      subtotal, desconto, total, forma,
+      recebido: forma === 'dinheiro' && recebido !== '' ? Number(recebido) : null,
+      cliente: cliente?.nome ?? null, cpf: cpf ?? cliente?.cpf ?? null, maior18: temAdulto && maior18,
+    };
     // zera a comanda SEM apagar o aviso de sucesso (FV-04) — ordem importava
     const quem = cliente ? ` · ${cliente.nome}` : '';
     limparItens();
+    setRecebido('');
     const rotuloForma = { pix: 'PIX', cartao: 'CARTÃO', dinheiro: 'DINHEIRO', credito: 'CRÉDITO' }[forma];
     setAviso({ tipo: 'ok', texto: `Venda finalizada: ${brl(total)} no ${rotuloForma}${quem}` });
+    setRecibo(dados);
     await recarregar(caixaId);
-    buscaRef.current?.focus();
   }
 
   // ------------------------------------------------ leitura do layout (mesmos dados do protótipo)
@@ -670,6 +694,15 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
         <div className="fixed inset-0 z-40 bg-estrutura/60" data-testid="pdv-drawer-fundo"
           onClick={() => setDrawer(false)} />
       )}
+
+      {cpfModal && (
+        <CpfNotaModal
+          resumo={`${linhas.reduce((a, l) => a + l.qtd, 0).toLocaleString('pt-BR')} ${linhas.length === 1 && linhas[0].qtd === 1 ? 'item' : 'itens'} · ${brl(total)} no ${{ pix: 'PIX', cartao: 'Cartão', dinheiro: 'Dinheiro', credito: 'Crédito' }[forma]}`}
+          cpfInicial={cliente?.cpf ?? null} pendente={salvando}
+          confirmar={confirmarVenda} voltar={() => { setCpfModal(false); buscaRef.current?.focus(); }} />
+      )}
+
+      {recibo && <ReciboVenda r={recibo} fechar={() => { setRecibo(null); buscaRef.current?.focus(); }} />}
 
       {seletorCliente && (
         <ClienteSeletor fechar={() => { setSeletorCliente(false); buscaRef.current?.focus(); }} onEscolher={setCliente} />

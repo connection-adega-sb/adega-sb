@@ -156,6 +156,14 @@ Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch padrã
 5. **Release de ponta a ponta:** `powershell -ExecutionPolicy Bypass -File scripts\release-0009.ps1` (ASCII, PS 5.1): staging (link → preflight → push → pgTAP) → `e2e` → `e2e:pdv` → commit/push `staging` → espera o CI do SHA → produção (link → preflight → push → pgTAP → **link de volta ao staging sempre**) → `merge --ff-only` em `main` → push. Para na primeira falha; tudo em `release-0009.log`.
 6. **Usuário `pdv@adegasb.com.br`:** criado **pelo cliente** em `/admin/usuarios` (papel Caixa, local Loja) — a IA não digita senha de ninguém; a senha escolhida entra na 1ª troca obrigatória (`/conta/senha`, mínimo 10). `rotaInicial('caixa')` → `/pdv`.
 
+## "CPF na nota?" + comprovante e recibo no PDV (2026-10-11 04:00)
+
+1. **Pedido do cliente:** deixar funcionando o fluxo do protótipo `pdv.html` (F12 → "CPF na nota?" → venda finalizada com cupom e recibo).
+2. **Feito:** F12 abre `CpfNotaModal` (CPF do cliente identificado já vem preenchido; vazio = consumidor não identificado; Enter finaliza, Esc volta) → venda → `ReciboVenda` com abas **Comprovante** (80 mm, "NÃO É DOCUMENTO FISCAL") e **Recibo** (valor por extenso — `src/lib/extenso.ts`); no **Crédito** a 2ª aba vira **Termo de débito** com linha de assinatura. **Imprimir** = `window.print()` com CSS de bobina 80 mm (`globals.css @media print`). "Nova venda (Enter)" fecha.
+3. **CPF digitado** é validado (DV, `src/lib/cpf.ts`, mesma regra da `cpf_valido`) e gravado em `vendas.cpf` logo após a venda (a função do banco só recebe o CPF do cadastro; sem migration). Dados do emitente em `src/lib/empresa.ts`.
+4. **NFC-e NÃO é emitida nem simulada** — o protótipo mostrava "NFC-e em homologação"; no sistema real isso só entra na F10 (IE, certificado A1, CSC, enquadramento MEI×ME). Nada de chave de acesso ou "DANFE" em comprovante.
+5. **Testes:** `e2e/pdv-funcional.cjs` ganhou `vender(pg, cpf)` (F12 → modal → Enter → lê o comprovante → fecha) usado em P14/P17/P32/P34/P38; **P42** confere `vendas.cpf` e o CPF impresso → **42** checks. Gates 28/28 (container, build Node 22).
+
 ## Redefinir senha + release de código (2026-10-11 02:15)
 
 1. **Problema:** a senha inicial aparece UMA vez ao criar o usuário; o cliente criou `pdv@adegasb.com.br` e não copiou → sem como entrar.

@@ -13,11 +13,13 @@
 # Arquivo ASCII de proposito (PowerShell 5.1 nao le UTF-8 sem BOM).
 
 $ErrorActionPreference = 'Continue'
-$STG = 'F:\Projetos\adega-sb-staging'
-$PRD = 'F:\Projetos\adega-sb'
+# pastas derivadas da posicao deste script (funciona em F:\, J:\ ou outra letra)
+$BASE = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$STG = Join-Path $BASE 'adega-sb-staging'
+$PRD = Join-Path $BASE 'adega-sb'
 $REF_STG = 'rogkczrtcfxurmnjvlwk'
 $REF_PRD = 'nhnlbptzjjibtmsgvcaw'
-$LOG = 'F:\Projetos\adega-sb-docs\release-0009.log'
+$LOG = Join-Path $BASE 'adega-sb-docs\release-0009.log'
 $linkadoProducao = $false
 
 function Log([string]$m) { Add-Content -Path $LOG -Value $m -Encoding utf8 }

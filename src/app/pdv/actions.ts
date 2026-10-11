@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { exigirSessao } from '@/lib/sessao';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { cpfValido } from '@/lib/cpf';
 
 // Server actions do PDV balcão (modulo-pdv.md §5 e §8).
 // Regras de negócio ficam NO SERVIDOR: preço lido do banco, caixa aberto obrigatório,
@@ -264,18 +265,20 @@ const Finalizar = z.object({
   forma: z.enum(['pix', 'cartao', 'dinheiro', 'credito']),
   maior18: z.boolean().default(false),
   clienteId: UUID.nullable().default(null),   // opcional (0008): cliente identificado na venda
+  cpf: z.string().regex(/^\d{11}$/, 'CPF inválido.').nullable().default(null),   // "CPF na nota?" (só dígitos)
 });
 
-export type ResultadoVenda = { erro?: string; total?: number; forma?: string };
+export type ResultadoVenda = { erro?: string; total?: number; forma?: string; vendaId?: string; quando?: string };
 
 export async function finalizarVendaPdv(dados: {
   sessaoId: string; itens: { produto_id: string; quantidade: number }[];
-  desconto?: number; forma: 'pix' | 'cartao' | 'dinheiro' | 'credito'; maior18?: boolean; clienteId?: string | null;
+  desconto?: number; forma: 'pix' | 'cartao' | 'dinheiro' | 'credito'; maior18?: boolean; clienteId?: string | null; cpf?: string | null;
 }): Promise<ResultadoVenda> {
   const s = await exigirSessao(['master', 'gerente', 'caixa']);
   const p = Finalizar.safeParse(dados);
   if (!p.success) return { erro: p.error.issues[0].message };
   if (p.data.forma === 'credito' && !p.data.clienteId) return { erro: 'Crédito exige cliente: identifique o cliente (F4).' };
+  if (p.data.cpf && !cpfValido(p.data.cpf)) return { erro: 'CPF inválido: confira os números.' };
 
   const sb = supabaseAdmin();
   const { data: sess } = await sb.from('caixa_sessoes')
@@ -298,9 +301,19 @@ export async function finalizarVendaPdv(dados: {
   });
   if (error) return { erro: traduzErro(error.message) };
 
+  const vendaId = typeof data === 'string' ? data : undefined;
+  // "CPF na nota?": o digitado vale mais que o do cadastro. Gravado logo depois da venda (a função do banco
+  // só recebe o CPF do cliente); se falhar, a venda segue válida e o comprovante sai sem CPF.
+  let quando: string | undefined;
+  if (vendaId) {
+    const upd = p.data.cpf
+      ? await sb.from('vendas').update({ cpf: p.data.cpf }).eq('id', vendaId).select('criado_em').maybeSingle()
+      : await sb.from('vendas').select('criado_em').eq('id', vendaId).maybeSingle();
+    quando = (upd.data?.criado_em as string | undefined) ?? undefined;
+  }
   const r = await resumoSessao(sess.id);
   const ultima = r ? r.vendasTotal : 0;
-  return { total: ultima, forma: p.data.forma, ...(typeof data === 'string' ? { sessao: data } : {}) };
+  return { total: ultima, forma: p.data.forma, vendaId, quando };
 }
 
 function traduzErro(msg: string): string {

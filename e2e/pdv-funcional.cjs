@@ -161,6 +161,24 @@ const qtdLinhas = (pg) => pg.locator('[data-testid^="pdv-item-"]').count();
 const qtds = (pg) => pg.getByTestId('pdv-qtd').allInnerTexts();
 const aviso = (pg) => pg.getByTestId('pdv-aviso').innerText();
 const digitar = (pg, t) => pg.getByTestId('pdv-busca').pressSequentially(t, { delay: 40 });
+// F12 → "CPF na nota?" (Enter; com cpf, digita antes) → comprovante (lê o texto e fecha com Enter).
+// Validação local que barra antes do modal (comanda vazia, +18) → volta sem nada. Recusa do servidor → modal fecha sem comprovante.
+let ultimoRecibo = null;
+async function vender(pg, cpf) {
+  ultimoRecibo = null;
+  await pg.keyboard.press('F12');
+  const modal = pg.getByTestId('pdv-cpf-modal');
+  try { await modal.waitFor({ timeout: 4000 }); } catch { return null; }
+  if (cpf) await pg.getByTestId('pdv-cpf').fill(cpf);
+  await pg.getByTestId('pdv-cpf').press('Enter');
+  await modal.waitFor({ state: 'detached', timeout: 25000 });
+  const recibo = pg.getByTestId('pdv-recibo');
+  if (!(await recibo.count())) return null;
+  ultimoRecibo = (await pg.getByTestId('pdv-recibo-papel').innerText()).replace(/[\u00A0\u202F]/g, ' ');
+  await pg.keyboard.press('Enter');
+  await recibo.waitFor({ state: 'detached', timeout: 5000 });
+  return ultimoRecibo;
+}
 // o Enter busca no servidor (staging remoto, ~500 ms) — sempre esperar a comanda refletir
 const esperaQtd = (pg, n) => pg.waitForFunction((esperado) =>
   [...document.querySelectorAll('[data-testid="pdv-qtd"]')].some((el) => el.textContent.trim() === String(esperado)),
@@ -248,7 +266,7 @@ let browser = null, srv = null;
     await esperaLinhas(pg, 2);
     await check('P13', 'comanda com 2 linhas (cerveja 5 + rosé 10)', async () => (await qtdLinhas(pg)) === 2);
     await pg.getByTestId('pdv-maior18').getByRole('checkbox').check();
-    await pg.keyboard.press('F12');
+    await vender(pg);
     await pg.getByTestId('pdv-aviso').filter({ hasText: 'Estoque insuficiente' }).waitFor({ timeout: 20000 });
     await check('P14', 'servidor recusa estoque negativo e mantém a comanda (FV-03)', async () =>
       (await qtdLinhas(pg)) === 2 && (await aviso(pg)).includes('Estoque insuficiente'));
@@ -269,7 +287,7 @@ let browser = null, srv = null;
     await digitar(pg, '7898107'); await pg.getByTestId('pdv-busca').press('Enter');
     await esperaQtd(pg, 1);
     await pg.getByTestId('pdv-maior18').getByRole('checkbox').check();
-    await pg.keyboard.press('F12');
+    await vender(pg, '52998224725');   // "CPF na nota?" com CPF válido (P42 confere no banco)
     // se não vier "Venda finalizada", diz POR QUÊ (sem aviso = a promise do finalizar rejeitou)
     try {
       await pg.getByTestId('pdv-aviso').filter({ hasText: 'Venda finalizada' }).waitFor({ timeout: 20000 });
@@ -311,6 +329,14 @@ let browser = null, srv = null;
     // o recarregar pós-venda pode ainda estar em voo quando o painel abre — esperar o resumo refletir a venda
     await pg.waitForFunction(() => (document.querySelector('[data-testid="pdv-painel"]')?.textContent ?? '')
       .replace(/[\u00A0\u202F]/g, ' ').includes('1 · R$ 4,49'), undefined, { timeout: 15000 });
+    await check('P42', '"CPF na nota?": CPF digitado gravado em vendas.cpf e impresso no comprovante (não fiscal)', async () => {
+      const { data: v } = await adm.from('vendas').select('cpf').order('criado_em', { ascending: false }).limit(1).single();
+      if (v.cpf !== '52998224725') throw new Error('vendas.cpf = ' + v.cpf);
+      if (!ultimoRecibo || !ultimoRecibo.includes('CPF 529.982.247-25') || !ultimoRecibo.includes('NÃO É DOCUMENTO FISCAL')) {
+        throw new Error('comprovante: ' + ultimoRecibo);
+      }
+      return true;
+    });
     await check('P19', 'resumo: 1 venda · R$ 4,49, gaveta R$ 200,00 (CX-06)', async () => {
       const t = limpa(await pg.getByTestId('pdv-painel').innerText());
       const bate = t.includes('1 · R$ 4,49') && t.includes('Gaveta') && t.includes('R$ 200,00');
@@ -451,7 +477,7 @@ let browser = null, srv = null;
     });
 
     await check('P32', 'finaliza a venda com o produto novo e a comanda volta a zero', async () => {
-      await p9.keyboard.press('F12');
+      await vender(p9);
       await p9.getByTestId('pdv-aviso').filter({ hasText: 'Venda finalizada' }).waitFor({ timeout: 20000 });
       const a = limpa(await aviso(p9));
       if (!a.includes('Venda finalizada: R$ 7,90 no PIX')) throw new Error('aviso: ' + a);
@@ -486,7 +512,7 @@ let browser = null, srv = null;
       // cerveja é +18 (DL-12): sem marcar, o F12 recusa — mesma regra do P15
       const conf18 = p9.getByTestId('pdv-maior18').locator('input');
       if (await conf18.count()) await conf18.check();
-      await p9.keyboard.press('F12');
+      await vender(p9);
       await p9.getByTestId('pdv-aviso').filter({ hasText: nomeCli }).waitFor({ timeout: 20000 });
       const { data: cli } = await adm.from('clientes').select('id, telefone, criado_por').eq('telefone', foneCli).single();
       clienteId = cli.id;
@@ -534,7 +560,8 @@ let browser = null, srv = null;
       return limpa(await p9.getByTestId('pdv-cliente-credito').innerText()).includes('Em aberto R$ 0,00');
     });
     await check('P38', 'F12 no crédito: aviso "no CRÉDITO", venda forma credito com cliente e a próxima volta ao PIX', async () => {
-      await p9.keyboard.press('F12');
+      const papel = await vender(p9);
+      if (!papel || !papel.includes('COMPROVANTE DE COMPRA NO CRÉDITO')) throw new Error('comprovante do crédito: ' + papel);
       await p9.getByTestId('pdv-aviso').filter({ hasText: 'no CRÉDITO' }).waitFor({ timeout: 20000 });
       const { data: v } = await adm.from('vendas').select('forma_pagamento, cliente_id, total').order('criado_em', { ascending: false }).limit(1).single();
       if (v.forma_pagamento !== 'credito' || v.cliente_id !== clienteId) throw new Error('venda: ' + JSON.stringify(v));

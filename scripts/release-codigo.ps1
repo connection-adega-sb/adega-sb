@@ -15,9 +15,11 @@ param(
 $ErrorActionPreference = 'Continue'
 # com -File o PowerShell entrega a lista 'a,b,c' como UM texto: separa aqui
 $Arquivos = @($Arquivos | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-$STG = 'F:\Projetos\adega-sb-staging'
-$PRD = 'F:\Projetos\adega-sb'
-$LOG = 'F:\Projetos\adega-sb-docs\release-codigo.log'
+# pastas derivadas da posicao deste script (funciona em F:\, J:\ ou outra letra)
+$BASE = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$STG = Join-Path $BASE 'adega-sb-staging'
+$PRD = Join-Path $BASE 'adega-sb'
+$LOG = Join-Path $BASE 'adega-sb-docs\release-codigo.log'
 
 function Log([string]$m) { Add-Content -Path $LOG -Value $m -Encoding utf8 }
 function Etapa([string]$n, [string]$t) { $l = "==> [$n] $t  ($(Get-Date -Format 'dd/MM HH:mm:ss'))"; Write-Host ''; Write-Host $l -ForegroundColor Cyan; Log $l }
