@@ -146,6 +146,99 @@ function traduzErro(msg: string): string {
   if (m.includes('saldo inicial não pode ser negativo')) return 'Saldo inicial não pode ser negativo.';
   if (m.includes('local não encontrado')) return 'Local inválido para este cadastro.';
   if (m.includes('usuário sem perfil ativo')) return 'Sessão inválida: recarregue a página e entre de novo.';
+  if (m.includes('sem permissão para editar')) return 'Só master, gerente ou estoquista editam produto.';
+  if (m.includes('produto não encontrado')) return 'Produto não encontrado.';
+  if (m.includes('fumígeno só pode')) return 'Fumígeno só pode ser produto de revenda.';
   if (m.includes('duplicate key') || m.includes('unique constraint')) return 'Já existe um produto com estes dados.';
   return msg;
+}
+
+
+// ================================================================ tela /produtos (cadastro FORA da venda — 0009)
+// Pedido do cliente 2026-10-11: "tela de cadastro de produtos para o operacional cadastrar independente
+// da venda, em outro terminal". Cadastro: quem vende (PAPEIS_CADASTRO). Edição: master/gerente/estoquista
+// (0009 produto_atualizar — preço muda só por quem responde pelo estoque; tudo no audit_log).
+
+export type ProdutoLinha = {
+  id: string; nome: string; codigo_barras: string | null; categoria_id: string | null; categoria: string | null;
+  preco_varejo: number; custo_medio: number | null; adulto: boolean; fumigeno: boolean;
+  tipo: string; unidade: string; ativo: boolean; criado_em: string; saldo: number;
+};
+export type FiltroProdutos = 'ativos' | 'todos' | 'sem_estoque';
+export type KpisProdutos = { ativos: number; semCodigo: number; adultos: number; semEstoque: number; novosMes: number };
+
+const limparTermo = (t: string) => t.replace(/[,()*%\\"]/g, ' ').trim();
+
+export async function listarProdutosCatalogo(termo: string, filtro: FiltroProdutos): Promise<ProdutoLinha[]> {
+  const s = await exigirSessao(PAPEIS_CADASTRO);
+  const sb = supabaseAdmin();
+  const t = limparTermo(termo);
+  let q = sb.from('produtos')
+    .select('id, nome, codigo_barras, categoria_id, preco_varejo, custo_medio, adulto, fumigeno, tipo, unidade, ativo, criado_em, categorias(nome)')
+    .eq('tenant_id', s.tenantId);
+  if (filtro !== 'todos') q = q.eq('ativo', true);
+  if (t.length >= 2) q = q.or(`nome.ilike.%${t}%,codigo_barras.ilike.%${t}%`);
+  const { data } = await q.order('nome').limit(500);
+  const prods = data ?? [];
+  const saldo = new Map<string, number>();
+  if (prods.length) {
+    const { data: sal } = await sb.from('estoque_saldos').select('produto_id, quantidade')
+      .in('produto_id', prods.map((p) => p.id as string));
+    for (const r of sal ?? []) saldo.set(r.produto_id as string, (saldo.get(r.produto_id as string) ?? 0) + Number(r.quantidade));
+  }
+  const linhas: ProdutoLinha[] = prods.map((p) => ({
+    id: p.id as string, nome: p.nome as string, codigo_barras: (p.codigo_barras as string | null) ?? null,
+    categoria_id: (p.categoria_id as string | null) ?? null,
+    categoria: (p.categorias as unknown as { nome: string } | null)?.nome ?? null,
+    preco_varejo: Number(p.preco_varejo), custo_medio: p.custo_medio === null ? null : Number(p.custo_medio),
+    adulto: !!p.adulto, fumigeno: !!p.fumigeno, tipo: p.tipo as string, unidade: p.unidade as string,
+    ativo: !!p.ativo, criado_em: p.criado_em as string, saldo: Math.round((saldo.get(p.id as string) ?? 0) * 1000) / 1000,
+  }));
+  return filtro === 'sem_estoque' ? linhas.filter((l) => l.tipo === 'revenda' && l.saldo <= 0) : linhas;
+}
+
+export async function kpisProdutos(): Promise<KpisProdutos> {
+  const lista = await listarProdutosCatalogo('', 'ativos');
+  const d = new Date();
+  const mes = new Date(d.getFullYear(), d.getMonth(), 1).toISOString();
+  return {
+    ativos: lista.length,
+    semCodigo: lista.filter((p) => !p.codigo_barras).length,
+    adultos: lista.filter((p) => p.adulto).length,
+    semEstoque: lista.filter((p) => p.tipo === 'revenda' && p.saldo <= 0).length,
+    novosMes: lista.filter((p) => p.criado_em >= mes).length,
+  };
+}
+
+// locais em que o usuário pode dar saldo inicial (master: todos; demais: os vinculados)
+export async function listarLocaisCadastro(): Promise<{ id: string; nome: string }[]> {
+  const s = await exigirSessao(PAPEIS_CADASTRO);
+  let q = supabaseAdmin().from('locais').select('id, nome').eq('tenant_id', s.tenantId).order('nome');
+  if (s.papel !== 'master') {
+    if (!s.locais.length) return [];
+    q = q.in('id', s.locais);
+  }
+  const { data } = await q;
+  return (data ?? []) as { id: string; nome: string }[];
+}
+
+export type EstadoEdicao = { erro?: string; ok?: boolean };
+
+export async function atualizarProduto(_: EstadoEdicao, form: FormData): Promise<EstadoEdicao> {
+  const s = await exigirSessao(['master', 'gerente', 'estoquista']);
+  const txt = (k: string) => { const v = form.get(k); return typeof v === 'string' ? v.trim() : ''; };
+  const id = txt('id');
+  if (!UUID.safeParse(id).success) return { erro: 'Produto não encontrado.' };
+  const precoTxt = txt('precoVarejo');
+  const preco = Number(precoTxt.includes(',') ? precoTxt.replace(/\./g, '').replace(',', '.') : precoTxt);
+  if (!precoTxt || Number.isNaN(preco) || preco < 0) return { erro: 'Preço de venda inválido (ex.: 12,50).' };
+  const categoria = txt('categoriaId');
+  if (categoria && !UUID.safeParse(categoria).success) return { erro: 'Categoria inválida.' };
+  const { error } = await supabaseAdmin().rpc('produto_atualizar', {
+    p_usuario: s.id, p_id: id, p_nome: txt('nome'), p_preco_varejo: preco,
+    p_codigo_barras: txt('codigoBarras') || null, p_categoria_id: categoria || null,
+    p_adulto: form.get('adulto') === 'on', p_fumigeno: form.get('fumigeno') === 'on',
+    p_ativo: form.get('ativo') === 'on',
+  });
+  return error ? { erro: traduzErro(error.message) } : { ok: true };
 }

@@ -73,7 +73,7 @@ export type CaixaInfo = { id: string; nome: string; local_id: string; local_nome
 export type ResumoCaixa = {
   sessaoId: string; aberta: boolean; valorAbertura: number;
   vendasQtd: number; vendasTotal: number; dinheiroEsperado: number;
-  porForma: { pix: number; cartao: number; dinheiro: number };
+  porForma: { pix: number; cartao: number; dinheiro: number; credito: number };
   movimentos: { id: string; tipo: string; valor: number; motivo: string }[];
   operador: string; abertaEm: string;
 };
@@ -107,13 +107,14 @@ async function resumoSessao(sessaoId: string): Promise<ResumoCaixa | null> {
   const { data: movs } = await sb.from('caixa_movimentos')
     .select('id, tipo, valor, motivo').eq('sessao_id', sessaoId).order('criado_em');
 
-  const porForma = { pix: 0, cartao: 0, dinheiro: 0 };
+  const porForma = { pix: 0, cartao: 0, dinheiro: 0, credito: 0 };
   let vendasTotal = 0;
   for (const v of vendas ?? []) {
     vendasTotal += Number(v.total);
     if (v.forma_pagamento === 'pix') porForma.pix += Number(v.total);
     else if (v.forma_pagamento === 'cartao') porForma.cartao += Number(v.total);
     else if (v.forma_pagamento === 'dinheiro') porForma.dinheiro += Number(v.total);
+    else if (v.forma_pagamento === 'credito') porForma.credito += Number(v.total);   // 0009: não entra na gaveta
   }
   // CX-06: esperado = abertura + dinheiro das vendas + suprimentos − sangrias
   let dinheiroEsperado = Number(sess.valor_abertura) + porForma.dinheiro;
@@ -259,7 +260,7 @@ const Finalizar = z.object({
   sessaoId: UUID,
   itens: z.array(Item).min(1, 'Comanda vazia.'),
   desconto: z.coerce.number().min(0).default(0),
-  forma: z.enum(['pix', 'cartao', 'dinheiro']),
+  forma: z.enum(['pix', 'cartao', 'dinheiro', 'credito']),
   maior18: z.boolean().default(false),
   clienteId: UUID.nullable().default(null),   // opcional (0008): cliente identificado na venda
 });
@@ -268,11 +269,12 @@ export type ResultadoVenda = { erro?: string; total?: number; forma?: string };
 
 export async function finalizarVendaPdv(dados: {
   sessaoId: string; itens: { produto_id: string; quantidade: number }[];
-  desconto?: number; forma: 'pix' | 'cartao' | 'dinheiro'; maior18?: boolean; clienteId?: string | null;
+  desconto?: number; forma: 'pix' | 'cartao' | 'dinheiro' | 'credito'; maior18?: boolean; clienteId?: string | null;
 }): Promise<ResultadoVenda> {
   const s = await exigirSessao(['master', 'gerente', 'caixa']);
   const p = Finalizar.safeParse(dados);
   if (!p.success) return { erro: p.error.issues[0].message };
+  if (p.data.forma === 'credito' && !p.data.clienteId) return { erro: 'Crédito exige cliente: identifique o cliente (F4).' };
 
   const sb = supabaseAdmin();
   const { data: sess } = await sb.from('caixa_sessoes')
@@ -302,7 +304,9 @@ export async function finalizarVendaPdv(dados: {
 
 function traduzErro(msg: string): string {
   if (msg.includes('cliente não encontrado')) return 'Cliente não encontrado ou desativado. Identifique de novo.';
-  if (msg.includes('18')) return 'Item +18: confirme que o cliente é maior de 18 anos.';
+  if (msg.includes('crédito exige cliente')) return 'Crédito exige cliente: identifique o cliente (F4).';
+  if (msg.includes('limite de crédito excedido')) return msg.replace(/^.*limite de crédito excedido/, 'Limite de crédito excedido') + '.';
+  if (msg.includes('+18')) return 'Item +18: confirme que o cliente é maior de 18 anos.';
   if (msg.includes('saldo insuficiente')) return 'Estoque insuficiente para um dos itens.';
   if (msg.includes('caixa fechado')) return 'Abra o caixa para vender.';
   if (msg.includes('vazia')) return 'A comanda está vazia.';

@@ -9,7 +9,7 @@ import { Icone } from '@/components/Icone';
 // as abas aparecem com o quadro vazio declarando isso, em vez de inventar dado.
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const FORMA: Record<string, string> = { pix: 'PIX', cartao: 'Cartão', dinheiro: 'Dinheiro', boleto: 'Boleto' };
+const FORMA: Record<string, string> = { pix: 'PIX', cartao: 'Cartão', dinheiro: 'Dinheiro', boleto: 'Boleto', credito: 'Crédito' };
 
 // rótulo de campo (mesmo desenho dos títulos de seção do protótipo)
 const LBL = 'block text-[11px] font-bold uppercase tracking-wide text-ink-soft';

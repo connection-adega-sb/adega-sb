@@ -1,8 +1,9 @@
 'use client';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useActionState, useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
-  definirAtivoCliente, historicoCliente, kpisClientes, listarClientes,
-  type ClienteResumo, type CompraCliente, type KpisClientes,
+  creditoCliente, definirAtivoCliente, definirLimiteCliente, historicoCliente, kpisClientes, listarClientes,
+  pagamentosCliente, receberCredito,
+  type ClienteResumo, type CompraCliente, type CreditoCliente, type KpisClientes, type PagamentoCredito,
 } from './actions';
 import { ClienteForm } from '@/components/ClienteForm';
 import { Icone } from '@/components/Icone';
@@ -13,7 +14,7 @@ import type { Papel } from '@/lib/papeis';
 type Filtro = 'ativos' | 'todos';
 type Aviso = { tipo: 'ok' | 'erro'; texto: string } | null;
 
-const FORMA: Record<string, string> = { pix: 'PIX', cartao: 'Cartão', dinheiro: 'Dinheiro', boleto: 'Boleto' };
+const FORMA: Record<string, string> = { pix: 'PIX', cartao: 'Cartão', dinheiro: 'Dinheiro', boleto: 'Boleto', credito: 'Crédito' };
 
 export function Clientes({ papel }: { papel: Papel }) {
   const [termo, setTermo] = useState('');
@@ -50,7 +51,7 @@ export function Clientes({ papel }: { papel: Papel }) {
     { id: 'novos', nome: 'Novos no mês', sub: 'cadastrados este mês', icone: 'mais', valor: kpis ? String(kpis.novosMes) : '…' },
     { id: 'compraram', nome: 'Compraram no mês', sub: 'identificados na venda', icone: 'carrinho', valor: kpis ? String(kpis.compraramMes) : '…' },
     { id: 'gasto', nome: 'Vendido a clientes', sub: 'no mês, com cliente', icone: 'dinheiro', valor: kpis ? brl(kpis.gastoMes) : '…' },
-    { id: 'telefone', nome: 'Com telefone', sub: 'dá para chamar no WhatsApp', icone: 'telefone', valor: kpis ? String(kpis.comTelefone) : '…' },
+    { id: 'receber', nome: 'A receber (crédito)', sub: 'compras no crédito em aberto', icone: 'calculadora', valor: kpis ? brl(kpis.aReceber) : '…' },
   ];
 
   return (
@@ -109,14 +110,15 @@ export function Clientes({ papel }: { papel: Papel }) {
                 <th className="hidden px-4 py-3 md:table-cell">CPF</th>
                 <th className="px-4 py-3 text-right">Compras</th>
                 <th className="hidden px-4 py-3 text-right sm:table-cell">Total gasto</th>
+                <th className="px-4 py-3 text-right">Em aberto</th>
                 <th className="hidden px-4 py-3 lg:table-cell">Última compra</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
-              {lista === null && <tr><td colSpan={7} className="px-4 py-6 text-center text-ink-soft">Carregando clientes…</td></tr>}
+              {lista === null && <tr><td colSpan={8} className="px-4 py-6 text-center text-ink-soft">Carregando clientes…</td></tr>}
               {lista?.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-ink-soft" data-testid="clientes-vazio">
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-ink-soft" data-testid="clientes-vazio">
                   {termo ? 'Nenhum cliente encontrado.' : 'Nenhum cliente cadastrado ainda. Clique em "Novo cliente".'}
                 </td></tr>
               )}
@@ -130,6 +132,7 @@ export function Clientes({ papel }: { papel: Papel }) {
                   <td className="hidden px-4 py-3 tabular-nums md:table-cell">{fmtCpf(c.cpf) || <span className="text-ink-soft">—</span>}</td>
                   <td className="px-4 py-3 text-right tabular-nums">{c.compras}</td>
                   <td className="hidden px-4 py-3 text-right tabular-nums sm:table-cell">{brl(c.gasto)}</td>
+                  <td className={`px-4 py-3 text-right font-bold tabular-nums ${c.emAberto > 0 ? 'text-bad' : 'text-ink-soft'}`} data-testid="clientes-em-aberto">{brl(c.emAberto)}</td>
                   <td className="hidden px-4 py-3 lg:table-cell">{c.ultimaCompra ? fmtData(c.ultimaCompra) : <span className="text-ink-soft">—</span>}</td>
                   <td className="px-4 py-3 text-right">
                     <button type="button" onClick={() => { setEditando(c); setAviso(null); }} data-testid="clientes-editar"
@@ -153,7 +156,7 @@ export function Clientes({ papel }: { papel: Papel }) {
       {aberto && (
         <Modal titulo={aberto.nome} fechar={() => setAberto(null)}>
           <Detalhe c={aberto} podeDesativar={podeDesativar} alternarAtivo={alternarAtivo}
-            editar={() => { setEditando(aberto); setAberto(null); }} />
+            editar={() => { setEditando(aberto); setAberto(null); }} atualizado={recarregar} />
         </Modal>
       )}
     </div>
@@ -180,8 +183,9 @@ function Modal({ titulo, fechar, children }: { titulo: string; fechar: () => voi
   );
 }
 
-function Detalhe({ c, podeDesativar, alternarAtivo, editar }: {
+function Detalhe({ c, podeDesativar, alternarAtivo, editar, atualizado }: {
   c: ClienteResumo; podeDesativar: boolean; alternarAtivo: (c: ClienteResumo) => void; editar: () => void;
+  atualizado: () => void;
 }) {
   const [compras, setCompras] = useState<CompraCliente[] | null>(null);
   useEffect(() => { historicoCliente(c.id).then(setCompras); }, [c.id]);
@@ -200,6 +204,8 @@ function Detalhe({ c, podeDesativar, alternarAtivo, editar }: {
         {c.observacao && <div className="rounded-card bg-acao-100 px-3 py-2 text-acao-700">{c.observacao}</div>}
         <div className="flex justify-between gap-3"><dt className="text-ink-soft">Cliente desde</dt><dd>{fmtData(c.criado_em)}</dd></div>
       </dl>
+
+      <Credito clienteId={c.id} podeLimite={podeDesativar} atualizado={atualizado} />
 
       <div>
         <p className="mb-2 text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">Últimas compras</p>
@@ -228,6 +234,75 @@ function Detalhe({ c, podeDesativar, alternarAtivo, editar }: {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// Crédito do cliente (0009): saldo em aberto, limite (master/gerente), receber pagamento e histórico.
+function Credito({ clienteId, podeLimite, atualizado }: { clienteId: string; podeLimite: boolean; atualizado: () => void }) {
+  const [cred, setCred] = useState<CreditoCliente | null>(null);
+  const [pags, setPags] = useState<PagamentoCredito[]>([]);
+  const [versao, setVersao] = useState(0);
+  const [limiteTxt, setLimiteTxt] = useState('');
+  const [erroLimite, setErroLimite] = useState<string | null>(null);
+  const [st, acao, pend] = useActionState(receberCredito, {});
+
+  useEffect(() => {
+    creditoCliente(clienteId).then((r) => { setCred(r); setLimiteTxt(r.limite === null ? '' : r.limite.toFixed(2).replace('.', ',')); });
+    pagamentosCliente(clienteId).then(setPags);
+  }, [clienteId, versao]);
+  useEffect(() => { if (st.ok) { setVersao((v) => v + 1); atualizado(); } }, [st, atualizado]);
+
+  async function salvarLimite() {
+    setErroLimite(null);
+    const r = await definirLimiteCliente(clienteId, limiteTxt);
+    if (r.erro) setErroLimite(r.erro); else setVersao((v) => v + 1);
+  }
+
+  return (
+    <div className="space-y-3 rounded-card border border-line p-3" data-testid="clientes-credito">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft">Crédito (compra para pagar depois)</p>
+        <p className={`text-lg font-extrabold tabular-nums ${cred && cred.saldo > 0 ? 'text-bad' : 'text-estrutura'}`} data-testid="clientes-credito-saldo">
+          {cred ? brl(cred.saldo) : '…'}
+        </p>
+      </div>
+      <p className="text-xs text-ink-soft">
+        Limite: <strong>{cred?.limite == null ? 'sem limite' : brl(cred.limite)}</strong>
+      </p>
+      {podeLimite && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={limiteTxt} onChange={(e) => setLimiteTxt(e.target.value)} inputMode="decimal" placeholder="Limite (vazio = sem limite)"
+            data-testid="clientes-limite" className="min-w-0 flex-1 rounded-full border border-line px-4 py-2 text-sm focus:border-estrutura focus:outline-none" />
+          <button type="button" onClick={salvarLimite} data-testid="clientes-limite-salvar"
+            className="rounded-full border border-estrutura px-4 py-2 text-sm font-bold text-estrutura">Salvar limite</button>
+          {erroLimite && <p className="w-full text-sm font-bold text-bad">{erroLimite}</p>}
+        </div>
+      )}
+      {cred && cred.saldo > 0 && (
+        <form key={cred.saldo} action={acao} className="grid gap-2 sm:grid-cols-[1fr_auto_auto]" data-testid="clientes-receber-form">
+          <input type="hidden" name="clienteId" value={clienteId} />
+          <input name="valor" inputMode="decimal" defaultValue={cred.saldo.toFixed(2).replace('.', ',')} data-testid="clientes-receber-valor"
+            className="rounded-full border border-line px-4 py-2 text-sm focus:border-estrutura focus:outline-none" aria-label="Valor recebido" />
+          <select name="forma" defaultValue="pix" data-testid="clientes-receber-forma"
+            className="rounded-full border border-line bg-white px-4 py-2 text-sm font-bold text-estrutura focus:outline-none">
+            <option value="pix">PIX</option><option value="cartao">Cartão</option><option value="dinheiro">Dinheiro (entra no caixa)</option>
+          </select>
+          <button disabled={pend} data-testid="clientes-receber"
+            className="rounded-full bg-acao-600 px-4 py-2 text-sm font-extrabold text-white disabled:opacity-50">{pend ? 'Registrando…' : 'Receber'}</button>
+          <p role="alert" className="text-sm font-bold text-bad sm:col-span-3">{st.erro}</p>
+        </form>
+      )}
+      {pags.length > 0 && (
+        <ul className="space-y-1" data-testid="clientes-pagamentos">
+          {pags.map((p) => (
+            <li key={p.id} className="flex justify-between rounded-card bg-ok/10 px-3 py-1.5 text-sm">
+              <span className="text-ink-soft">{dataHora(p.criado_em)} · pagamento {FORMA[p.forma] ?? p.forma}</span>
+              <span className="font-bold tabular-nums text-ok">− {brl(p.valor)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

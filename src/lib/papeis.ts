@@ -15,9 +15,10 @@ export const ACESSO_ROTA: { prefixo: string; papeis: readonly Papel[] }[] = [
   { prefixo: '/bar', papeis: ['master', 'gerente', 'bartender', 'caixa'] }, // mesas/comandas/copão (roadmap F4.1)
   { prefixo: '/estoque', papeis: ['master', 'gerente', 'estoquista'] }, // catálogo + estoque profundo (PRD-catalogo-estoque-multilocal.md)
   { prefixo: '/clientes', papeis: ['master', 'gerente', 'caixa'] }, // cadastro de clientes (PRD-clientes.md · 0008)
+  { prefixo: '/produtos', papeis: ['master', 'gerente', 'caixa', 'bartender', 'estoquista'] }, // cadastro fora da venda (0009); editar só master/gerente/estoquista
 ];
 
-export const ROTAS_PUBLICAS = ['/login', '/sem-acesso', '/indisponivel', '/api/health'];
+export const ROTAS_PUBLICAS = ['/login', '/sem-acesso', '/indisponivel', '/api/health', '/manifest.webmanifest'];
 
 export function papelPodeAcessar(papel: Papel, caminho: string): boolean {
   const regra = ACESSO_ROTA.find((r) => caminho === r.prefixo || caminho.startsWith(r.prefixo + '/'));

@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import '@fontsource/source-sans-3/400.css';
 import '@fontsource/source-sans-3/600.css';
 import '@fontsource/source-sans-3/700.css';
@@ -10,7 +10,11 @@ export const metadata: Metadata = {
   title: { default: 'ADEGA SB', template: '%s · ADEGA SB' },
   description: 'Sistema de gestão da ADEGA SB: balcão, bar, depósito, delivery e distribuidora.',
   robots: { index: false, follow: false },
+  // app instalável (manifest.ts): no iPhone "Adicionar à Tela de Início" abre em tela cheia com este nome
+  appleWebApp: { capable: true, title: 'ADEGA SB', statusBarStyle: 'black-translucent' },
 };
+
+export const viewport: Viewport = { themeColor: '#232F3E' };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

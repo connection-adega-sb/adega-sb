@@ -9,7 +9,7 @@ import {
 } from './actions';
 import { CadastroRapidoProduto } from '@/components/CadastroRapidoProduto';
 import { ClienteSeletor } from '@/components/ClienteSeletor';
-import type { Cliente } from '@/app/clientes/actions';
+import { creditoCliente, type Cliente, type CreditoCliente } from '@/app/clientes/actions';
 import { fone as fmtFone } from '@/lib/formatar';
 import { PrecificacaoModal } from '@/components/PrecificacaoModal';
 import { SiteLojaModal } from '@/components/SiteLojaModal';
@@ -34,11 +34,19 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
   // comanda
   const [linhas, setLinhas] = useState<Linha[]>([]);
   const [desconto, setDesconto] = useState(0);
-  const [forma, setForma] = useState<'pix' | 'cartao' | 'dinheiro'>('pix');
+  const [forma, setForma] = useState<'pix' | 'cartao' | 'dinheiro' | 'credito'>('pix');
   const [maior18, setMaior18] = useState(false);
   // cliente identificado (opcional — 0008); F4 abre o seletor
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [seletorCliente, setSeletorCliente] = useState(false);
+  // "Crédito" (0009): conta do cliente — saldo em aberto e limite aparecem na comanda
+  const [credito, setCredito] = useState<CreditoCliente | null>(null);
+  useEffect(() => {
+    if (!cliente || forma !== 'credito') { setCredito(null); return; }
+    let vivo = true;
+    creditoCliente(cliente.id).then((r) => { if (vivo) setCredito(r); });
+    return () => { vivo = false; };
+  }, [cliente, forma]);
   const [aviso, setAviso] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
 
   // busca
@@ -181,7 +189,10 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
       l.produto.id === id ? (l.qtd + delta < 1 ? [] : [{ ...l, qtd: l.qtd + delta }]) : [l]));
 
   const remover = (id: string) => setLinhas((prev) => prev.filter((l) => l.produto.id !== id));
-  const limparItens = () => { setLinhas([]); setDesconto(0); setMaior18(false); setCliente(null); };
+  const limparItens = () => {
+    setLinhas([]); setDesconto(0); setMaior18(false); setCliente(null);
+    setForma((f) => (f === 'credito' ? 'pix' : f));   // crédito é por venda: a próxima volta ao PIX
+  };
   const limpar = () => { limparItens(); setAviso(null); };
 
   const subtotal = linhas.reduce((s, l) => s + l.produto.preco_varejo * l.qtd, 0);
@@ -196,6 +207,11 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
       setAviso({ tipo: 'erro', texto: 'Item +18: confirme que o cliente é maior de 18 anos.' });
       return;
     }
+    if (forma === 'credito' && !cliente) {
+      setAviso({ tipo: 'erro', texto: 'Crédito exige cliente: identifique o cliente (F4).' });
+      setSeletorCliente(true);
+      return;
+    }
     setSalvando(true); setAviso(null);
     const r = await finalizarVendaPdv({
       sessaoId: sessao.sessaoId,
@@ -207,7 +223,8 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
     // zera a comanda SEM apagar o aviso de sucesso (FV-04) — ordem importava
     const quem = cliente ? ` · ${cliente.nome}` : '';
     limparItens();
-    setAviso({ tipo: 'ok', texto: `Venda finalizada: ${brl(total)} no ${forma.toUpperCase()}${quem}` });
+    const rotuloForma = { pix: 'PIX', cartao: 'CARTÃO', dinheiro: 'DINHEIRO', credito: 'CRÉDITO' }[forma];
+    setAviso({ tipo: 'ok', texto: `Venda finalizada: ${brl(total)} no ${rotuloForma}${quem}` });
     await recarregar(caixaId);
     buscaRef.current?.focus();
   }
@@ -529,6 +546,11 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-bold text-estrutura" data-testid="pdv-cliente-nome">{cliente.nome}</span>
                       {cliente.telefone && <span className="block text-xs text-ink-soft">{fmtFone(cliente.telefone)}</span>}
+                      {forma === 'credito' && credito && (
+                        <span className="block text-xs font-bold text-acao-700" data-testid="pdv-cliente-credito">
+                          Em aberto {brl(credito.saldo)} · limite {credito.limite === null ? 'livre' : brl(credito.limite)}
+                        </span>
+                      )}
                     </span>
                   </span>
                   <button type="button" onClick={() => setCliente(null)} data-testid="pdv-cliente-remover" aria-label="Tirar cliente da venda"
@@ -561,14 +583,20 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
 
               <div className="space-y-2">
                 <span className="label">Forma de pagamento</span>
-                <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Forma de pagamento">
-                  {(([['pix', 'PIX', 'pix'], ['cartao', 'Cartão', 'cartao'], ['dinheiro', 'Dinheiro', 'dinheiro']] as const)).map(([id, rotulo, icone]) => (
-                    <button key={id} onClick={() => setForma(id)} data-testid={`pdv-forma-${id}`}
+                <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="Forma de pagamento">
+                  {(([['pix', 'PIX', 'pix'], ['cartao', 'Cartão', 'cartao'], ['dinheiro', 'Dinheiro', 'dinheiro'], ['credito', 'Crédito', 'conta']] as const)).map(([id, rotulo, icone]) => (
+                    <button key={id} data-testid={`pdv-forma-${id}`}
+                      title={id === 'credito' ? 'Cliente leva e paga depois — exige cliente identificado' : undefined}
+                      onClick={() => {
+                        setForma(id);
+                        // crédito sem cliente: abre a identificação na hora (o banco recusa crédito sem cliente)
+                        if (id === 'credito' && !cliente && aberto) setSeletorCliente(true);
+                      }}
                       role="radio" aria-checked={forma === id}
                       className={`flex flex-col items-center justify-center gap-1 rounded-card border px-2 py-2.5 text-[13px] ${forma === id
                         ? 'border-acao-600 bg-acao-100 font-bold text-acao-700'
                         : 'border-line bg-white font-semibold text-ink-soft hover:border-estrutura hover:text-estrutura'}`}>
-                      <Icone n={icone === 'pix' ? 'pix' : icone === 'cartao' ? 'cartao' : 'dinheiro'} className="h-5 w-5" />
+                      <Icone n={icone} className="h-5 w-5" />
                       {rotulo}
                     </button>
                   ))}
@@ -778,10 +806,11 @@ function PainelCaixa({ caixa, sessao, turno, papel, nome, aba, setAba, fechar, a
             ) : (
               <form action={acaoFech} className="space-y-3" data-testid="pdv-form-fechar" noValidate>
                 <input type="hidden" name="sessaoId" value={sessao.sessaoId} />
-                <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                <div className="grid grid-cols-2 gap-2 text-center text-sm sm:grid-cols-4">
                   <div className="rounded-card bg-fundo p-2"><p className="text-xs text-ink-soft">PIX</p><p className="font-bold">{brl(sessao.porForma.pix)}</p></div>
                   <div className="rounded-card bg-fundo p-2"><p className="text-xs text-ink-soft">Cartão</p><p className="font-bold">{brl(sessao.porForma.cartao)}</p></div>
                   <div className="rounded-card bg-fundo p-2"><p className="text-xs text-ink-soft">Dinheiro</p><p className="font-bold">{brl(sessao.porForma.dinheiro)}</p></div>
+                  <div className="rounded-card bg-fundo p-2" title="Vendido no crédito: não entra na gaveta"><p className="text-xs text-ink-soft">Crédito</p><p className="font-bold">{brl(sessao.porForma.credito)}</p></div>
                 </div>
                 <p className="text-sm text-ink-soft">Esperado na gaveta: <strong>{brl(sessao.dinheiroEsperado)}</strong></p>
                 <input name="valorContado" type="number" min={0} step="0.01" required placeholder="Dinheiro contado (R$)"

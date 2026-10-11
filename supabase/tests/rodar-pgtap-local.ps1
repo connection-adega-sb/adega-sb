@@ -78,7 +78,7 @@ try {
 
   # 3. As 7 migrations em ordem (0001 cria tenant + 3 locais; 0007 é a nova)
   Passo "Aplicando migrations 0001 → 0007..."
-  foreach ($n in @("0001_acesso", "0002_permissoes_data_api", "0003_pdv_catalogo", "0004_catalogo_estoque", "0005_bar", "0006_comanda_remover_item", "0007_produto_criar", "0008_clientes")) {
+  foreach ($n in @("0001_acesso", "0002_permissoes_data_api", "0003_pdv_catalogo", "0004_catalogo_estoque", "0005_bar", "0006_comanda_remover_item", "0007_produto_criar", "0008_clientes", "0009_credito_produtos")) {
     $arq = "supabase\migrations\$n.sql"
     if (-not (Test-Path $arq)) { throw "migration não encontrada: $arq" }
     Rodar-Sql $arq $n | Out-Null
@@ -156,9 +156,20 @@ try {
   Write-Host ($saida8 -split "`n" | Where-Object { $_ -match "^(ok|not ok)" })
   if ($falhas8.Count -gt 0) { throw "0008: $($falhas8.Count) assert(s) falharam" }
 
+  # 10. Teste da 0009 (comportamental: venda no crédito, recebimento, limite, produto_atualizar)
+  Passo "Rodando pgTAP 0009 (32 asserts, comportamental)..."
+  $gate9 = "supabase\tests\_gate_0009.sql"
+  node scripts\gate-pgtap.cjs "supabase\tests\0009_test.sql" $gate9 | Out-Null
+  $saida9 = Rodar-Sql $gate9 "0009_test"
+  Remove-Item $gate9 -ErrorAction SilentlyContinue
+  $falhas9 = ($saida9 -split "`n" | Where-Object { $_ -match "^not ok" })
+  $oks9    = ($saida9 -split "`n" | Where-Object { $_ -match "^ok " })
+  Write-Host ($saida9 -split "`n" | Where-Object { $_ -match "^(ok|not ok)" })
+  if ($falhas9.Count -gt 0) { throw "0009: $($falhas9.Count) assert(s) falharam" }
+
   # $totalAntes = 0001+0002+0003+0004+0005
   Write-Host ""
-  Write-Host "PGTAP LOCAL: TUDO VERDE — $($totalAntes) (0001–0005) + $($oks6.Count) da 0006 + $($oks7.Count) da 0007 + $($oks8.Count) da 0008 = $($totalAntes + $oks6.Count + $oks7.Count + $oks8.Count)" -ForegroundColor Green
+  Write-Host "PGTAP LOCAL: TUDO VERDE — $($totalAntes) (0001–0005) + $($oks6.Count) da 0006 + $($oks7.Count) da 0007 + $($oks8.Count) da 0008 + $($oks9.Count) da 0009 = $($totalAntes + $oks6.Count + $oks7.Count + $oks8.Count + $oks9.Count)" -ForegroundColor Green
 }
 finally {
   if ($Manter) { Write-Host "container '$container' mantido na porta $Porta (para depurar)" -ForegroundColor Yellow }

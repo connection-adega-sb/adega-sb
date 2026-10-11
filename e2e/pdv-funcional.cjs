@@ -518,6 +518,79 @@ let browser = null, srv = null;
       if (compras !== '1') throw new Error('compras = ' + compras);
       return true;
     });
+
+    // ------------------------------------------------ 11) venda no CRÉDITO (conta do cliente · 0009)
+    await check('P37', 'Crédito sem cliente abre "Identificar cliente" na hora', async () => {
+      await digitar(p9, '7898107'); await p9.getByTestId('pdv-busca').press('Enter');
+      await p9.waitForFunction(() => document.querySelectorAll('[data-testid^="pdv-item-"]').length > 0, undefined, { timeout: 15000 });
+      const conf18 = p9.getByTestId('pdv-maior18').locator('input');
+      if (await conf18.count()) await conf18.check();
+      await p9.getByTestId('pdv-forma-credito').click();
+      await p9.getByTestId('cliente-seletor').waitFor({ timeout: 5000 });
+      await p9.getByTestId('cliente-busca').fill(foneCli);
+      await p9.getByTestId('cliente-opcao').first().waitFor({ timeout: 10000 });
+      await p9.getByTestId('cliente-opcao').first().click();
+      await p9.getByTestId('pdv-cliente-credito').waitFor({ timeout: 10000 });
+      return limpa(await p9.getByTestId('pdv-cliente-credito').innerText()).includes('Em aberto R$ 0,00');
+    });
+    await check('P38', 'F12 no crédito: aviso "no CRÉDITO", venda forma credito com cliente e a próxima volta ao PIX', async () => {
+      await p9.keyboard.press('F12');
+      await p9.getByTestId('pdv-aviso').filter({ hasText: 'no CRÉDITO' }).waitFor({ timeout: 20000 });
+      const { data: v } = await adm.from('vendas').select('forma_pagamento, cliente_id, total').order('criado_em', { ascending: false }).limit(1).single();
+      if (v.forma_pagamento !== 'credito' || v.cliente_id !== clienteId) throw new Error('venda: ' + JSON.stringify(v));
+      return (await p9.getByTestId('pdv-forma-pix').getAttribute('aria-checked')) === 'true';
+    });
+    await check('P39', '/clientes: em aberto R$ 4,49 → receber no PIX → saldo zera e pagamento gravado', async () => {
+      const pc = await ctx9.newPage();
+      await pc.goto(BASE + '/clientes');
+      await pc.getByTestId('clientes-busca').fill(foneCli);
+      const linha = pc.getByTestId('clientes-linha').filter({ hasText: nomeCli });
+      await linha.waitFor({ timeout: 15000 });
+      const aberto = limpa(await linha.getByTestId('clientes-em-aberto').innerText()).trim();
+      if (aberto !== 'R$ 4,49') throw new Error('em aberto = ' + aberto);
+      await linha.getByRole('button', { name: nomeCli }).click();
+      await pc.getByTestId('clientes-receber').waitFor({ timeout: 10000 });
+      await pc.getByTestId('clientes-receber').click();
+      await pc.getByTestId('clientes-credito-saldo').filter({ hasText: 'R$ 0,00' }).waitFor({ timeout: 15000 });
+      await pc.close();
+      const { data: pg } = await adm.from('credito_pagamentos').select('valor, forma').eq('cliente_id', clienteId);
+      if (pg?.length !== 1 || Number(pg[0].valor) !== 4.49 || pg[0].forma !== 'pix') throw new Error('pagamentos: ' + JSON.stringify(pg));
+      return true;
+    });
+
+    // ------------------------------------------------ 12) /produtos: cadastro FORA da venda (0009)
+    const codigoTela = '788' + String(Date.now());
+    const nomeTela = 'Produto Tela Cadastro ' + String(Date.now()).slice(-6);
+    await check('P40', '/produtos: "Novo produto" cadastra fora da venda e a linha aparece na tabela', async () => {
+      const pp = await ctx9.newPage();
+      await pp.goto(BASE + '/produtos');
+      await pp.getByTestId('produtos-novo').click();
+      await pp.getByTestId('cadastro-modal').waitFor({ timeout: 5000 });
+      const titulo = await pp.getByTestId('cadastro-modal').getByRole('heading').innerText();
+      await pp.getByTestId('cadastro-nome').fill(nomeTela);
+      await pp.getByTestId('cadastro-ean').fill(codigoTela);
+      await pp.getByTestId('cadastro-preco').fill('9,90');
+      await pp.getByTestId('cadastro-submit').click();
+      await pp.getByTestId('cadastro-modal').waitFor({ state: 'detached', timeout: 20000 });
+      await pp.getByTestId('produtos-busca').fill(codigoTela);
+      await pp.getByTestId('produtos-linha').filter({ hasText: nomeTela }).waitFor({ timeout: 15000 });
+      const { data: prod } = await adm.from('produtos').select('criado_por, preco_varejo').eq('codigo_barras', codigoTela).single();
+      await pp.close();
+      if (titulo.trim() !== 'Novo produto') throw new Error('título do modal: ' + titulo);
+      return !!prod.criado_por && Number(prod.preco_varejo) === 9.9;
+    });
+    await check('P41', 'caixa cadastra mas NÃO edita produto (botão Editar só para master/gerente/estoquista)', async () => {
+      const pp = await ctx9.newPage();
+      await pp.goto(BASE + '/produtos');
+      await pp.getByTestId('produtos-linha').first().waitFor({ timeout: 15000 });
+      const n = await pp.getByTestId('produtos-editar').count();
+      await pp.close();
+      return n === 0;
+    });
+    {
+      const { error: eP } = await adm.from('produtos').update({ ativo: false }).eq('codigo_barras', codigoTela);
+      if (eP) console.log('  (aviso: não consegui desativar o produto da tela: ' + eP.message + ')');
+    }
     try { await fecharCaixa(p9); } catch (e) { console.log('  (aviso: não consegui fechar o caixa do P32: ' + e.message + ')'); }
 
     // Limpeza: o produto criado aqui fica com movimento de estoque (append-only), então não dá

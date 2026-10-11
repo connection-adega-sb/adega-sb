@@ -15,6 +15,10 @@ type Props = {
   prefill?: { nome?: string; codigoBarras?: string };
   fechar: () => void;
   onCriado: (p: ProdutoNovo) => void | Promise<void>;
+  // textos: o padrão é o fluxo "no meio da venda"; a tela /produtos (cadastro independente) troca os três
+  titulo?: string;
+  subtitulo?: string;
+  rotuloSubmit?: string;
 };
 
 // categorias não mudam dentro de uma venda — busca uma vez e reusa nas aberturas seguintes
@@ -23,7 +27,12 @@ let cacheCategorias: Categoria[] | null = null;
 const CAMPO = 'mt-1 w-full rounded-xl border-[1.5px] border-line-input bg-white px-3.5 py-2.5 focus:outline-none focus:border-estrutura';
 const LBL = 'block text-sm font-bold text-estrutura';
 
-export function CadastroRapidoProduto({ localId, localNome, prefill, fechar, onCriado }: Props) {
+export function CadastroRapidoProduto({
+  localId, localNome, prefill, fechar, onCriado,
+  titulo = 'Produto novo',
+  subtitulo = 'Cadastre agora e volte para a venda — o produto entra na comanda sozinho.',
+  rotuloSubmit = 'Cadastrar e voltar para a venda',
+}: Props) {
   const [cats, setCats] = useState<Categoria[]>(cacheCategorias ?? []);
   const [nome, setNome] = useState(prefill?.nome ?? '');
   const [ean, setEan] = useState(prefill?.codigoBarras ?? '');
@@ -92,11 +101,11 @@ export function CadastroRapidoProduto({ localId, localNome, prefill, fechar, onC
         className="relative max-h-[92dvh] w-full max-w-xl overflow-y-auto rounded-t-banner bg-white p-5 sm:rounded-banner"
       >
         <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-xl font-extrabold text-estrutura">Produto novo</h2>
+          <h2 className="text-xl font-extrabold text-estrutura">{titulo}</h2>
           <button type="button" onClick={fechar} aria-label="Fechar cadastro" data-testid="cadastro-fechar" className="text-ink-soft">✕</button>
         </div>
         <p className="mb-4 text-sm text-ink-soft">
-          Cadastre agora e volte para a venda — o produto entra na comanda sozinho.
+          {subtitulo}
         </p>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -220,7 +229,7 @@ export function CadastroRapidoProduto({ localId, localNome, prefill, fechar, onC
             type="submit" disabled={pendente} data-testid="cadastro-submit"
             className="flex-[2] rounded-full bg-acao-600 px-5 py-3 font-extrabold text-white disabled:opacity-50"
           >
-            {pendente ? 'Cadastrando…' : 'Cadastrar e voltar para a venda'}
+            {pendente ? 'Cadastrando…' : rotuloSubmit}
           </button>
         </div>
       </form>
