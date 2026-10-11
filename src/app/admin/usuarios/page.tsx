@@ -5,6 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { ROTULO_PAPEL, ehPapel } from '@/lib/papeis';
 import { FormNovo } from './FormNovo';
 import { alternarAtivo } from './actions';
+import { RedefinirSenha } from './RedefinirSenha';
 
 export const metadata: Metadata = { title: 'Usuários' };
 export const dynamic = 'force-dynamic';
@@ -38,8 +39,11 @@ export default async function Usuarios() {
                   <td className="px-4 py-3">{['master', 'gerente'].includes(p.role) ? 'todos' : (vinc ?? []).filter((v) => v.profile_id === p.id).map((v) => nomeLocal.get(v.local_id)).join(', ') || '—'}</td>
                   <td className="px-4 py-3">{p.ativo ? <span className="text-ok font-bold">ativo</span> : <span className="text-bad font-bold">inativo</span>}{p.deve_trocar_senha && <span className="block text-xs text-warn">troca de senha pendente</span>}</td>
                   <td className="px-4 py-3 text-right">{p.id !== s.id && (
-                    <form action={alternarAtivo}><input type="hidden" name="id" value={p.id} />
-                      <button className="rounded-full border border-line px-3 py-1 text-xs font-bold">{p.ativo ? 'Desativar' : 'Reativar'}</button></form>)}</td>
+                    <div className="flex flex-wrap items-start justify-end gap-2">
+                      <RedefinirSenha id={p.id} />
+                      <form action={alternarAtivo}><input type="hidden" name="id" value={p.id} />
+                        <button className="rounded-full border border-line px-3 py-1 text-xs font-bold">{p.ativo ? 'Desativar' : 'Reativar'}</button></form>
+                    </div>)}</td>
                 </tr>))}</tbody>
             </table>
           </div>

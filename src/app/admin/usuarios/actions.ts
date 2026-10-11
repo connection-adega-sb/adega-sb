@@ -50,3 +50,23 @@ export async function alternarAtivo(form: FormData) {
   await adm.from('profiles').update({ ativo: !data.ativo }).eq('id', id);
   revalidatePath('/admin/usuarios');
 }
+
+// Redefinir senha (2026-10-11): o master perdeu a senha inicial de um usuário (ela aparece UMA vez).
+// Gera outra senha inicial, mostra UMA vez de novo e obriga a troca no próximo acesso. Nunca o próprio master.
+export type EstadoRedefinir = { erro?: string; senha?: string };
+
+export async function redefinirSenha(_: EstadoRedefinir, form: FormData): Promise<EstadoRedefinir> {
+  const master = await exigirSessao(['master']);
+  const id = z.string().uuid().safeParse(form.get('id'));
+  if (!id.success) return { erro: 'Usuário inválido.' };
+  if (id.data === master.id) return { erro: 'Para a sua senha use "Trocar senha".' };
+  const adm = supabaseAdmin();
+  const { data: perfil } = await adm.from('profiles').select('id').eq('id', id.data).eq('tenant_id', master.tenantId).maybeSingle();
+  if (!perfil) return { erro: 'Usuário não encontrado.' };
+  const senha = senhaInicial();
+  const { error } = await adm.auth.admin.updateUserById(id.data, { password: senha });
+  if (error) return { erro: 'Não foi possível redefinir a senha.' };
+  await adm.from('profiles').update({ deve_trocar_senha: true }).eq('id', id.data);
+  revalidatePath('/admin/usuarios');
+  return { senha };
+}

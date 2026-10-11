@@ -156,6 +156,12 @@ Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch padrã
 5. **Release de ponta a ponta:** `powershell -ExecutionPolicy Bypass -File scripts\release-0009.ps1` (ASCII, PS 5.1): staging (link → preflight → push → pgTAP) → `e2e` → `e2e:pdv` → commit/push `staging` → espera o CI do SHA → produção (link → preflight → push → pgTAP → **link de volta ao staging sempre**) → `merge --ff-only` em `main` → push. Para na primeira falha; tudo em `release-0009.log`.
 6. **Usuário `pdv@adegasb.com.br`:** criado **pelo cliente** em `/admin/usuarios` (papel Caixa, local Loja) — a IA não digita senha de ninguém; a senha escolhida entra na 1ª troca obrigatória (`/conta/senha`, mínimo 10). `rotaInicial('caixa')` → `/pdv`.
 
+## Redefinir senha + release de código (2026-10-11 02:15)
+
+1. **Problema:** a senha inicial aparece UMA vez ao criar o usuário; o cliente criou `pdv@adegasb.com.br` e não copiou → sem como entrar.
+2. **Correção:** `/admin/usuarios` ganhou **Redefinir senha** por linha (só master; nunca a própria conta): gera outra senha inicial (`senhaInicial()`), mostra uma vez e marca `deve_trocar_senha`. Sem migration.
+3. **`scripts/release-codigo.ps1`** (ASCII, PS 5.1): release de código **sem** migration — checagens → `npm run e2e` → commit dos arquivos passados em `-Arquivos` → push → espera o CI do SHA → `merge --ff-only` + push `main`. Para na 1ª falha; log em `adega-sb-docs\release-codigo.log`. Para mudança com migration, copiar o `release-0009.ps1`.
+
 ## Layout único ADEGA SB (2026-10-10) — regra permanente
 
 1. **Pedido do cliente (10/10):** "o projeto tem que funcionar expressamente neste layout que temos aqui da ADEGA SB". Outra IA tinha criado telas novas com um cabeçalho provisório e abas em pílula laranja que não existem nos protótipos. Auditoria: `adega-sb-docs\auditoria-cisa-2026-10-10.html`; plano: `adega-sb-docs\PRD-layout-adega-sb.md`.
