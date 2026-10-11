@@ -23,8 +23,8 @@ type Linha = { produto: ProdutoBusca; qtd: number };
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
-  caixas: CaixaInfo[]; nome: string; papel: Papel; deveTrocarSenha: boolean;
+export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarSenha }: {
+  caixas: CaixaInfo[]; nome: string; papel: Papel; usuarioId: string; deveTrocarSenha: boolean;
 }) {
   const [caixas] = useState<CaixaInfo[]>(caixasInicial);
   const [caixaId, setCaixaId] = useState<string>(caixasInicial[0]?.id ?? '');
@@ -196,6 +196,9 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
   };
   const limpar = () => { limparItens(); setAviso(null); };
 
+  // caixa aberto por OUTRA pessoa (§8: só quem abriu vende e fecha; master pode tudo) — avisa ANTES de montar a comanda
+  const outroOperador = !!(aberto && sessao && sessao.operadorId !== usuarioId && papel !== 'master');
+
   const subtotal = linhas.reduce((s, l) => s + l.produto.preco_varejo * l.qtd, 0);
   const total = Math.max(0, subtotal - desconto);
   const temAdulto = linhas.some((l) => l.produto.adulto);
@@ -204,6 +207,7 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
   async function finalizar() {
     if (!aberto || !sessao || salvando) return;
     if (!linhas.length) { setAviso({ tipo: 'erro', texto: 'Comanda vazia.' }); return; }
+    if (outroOperador) { setAviso({ tipo: 'erro', texto: `Este caixa está aberto por ${sessao.operador}: só quem abriu vende nele.` }); return; }
     if (temAdulto && !maior18) {
       setAviso({ tipo: 'erro', texto: 'Item +18: confirme que o cliente é maior de 18 anos.' });
       return;
@@ -306,6 +310,13 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
             Ponto de venda
             <span className="text-[14.5px] font-normal text-ink-soft"> - passe o leitor ou digite o produto</span>
           </h1>
+
+          {outroOperador && sessao && (
+            <p role="alert" data-testid="pdv-outro-operador" className="rounded-card border-l-4 border-bad bg-white p-3 text-sm">
+              <strong>{nomeCaixa} está aberto por {sessao.operador}.</strong> Só quem abriu vende e fecha este caixa.
+              Peça para {sessao.operador} fechar (F8 → Fechar caixa){caixas.length > 1 ? ' ou escolha outro caixa no topo' : ''}.
+            </p>
+          )}
 
           <div className="flex flex-col gap-3 sm:flex-row">
             <div className="relative flex-1">
@@ -635,7 +646,7 @@ export function Pdv({ caixas: caixasInicial, nome, papel, deveTrocarSenha }: {
                   <Icone n="caixa" className="h-5 w-5" />
                   <span>Caixa <span className="hidden font-semibold opacity-70 sm:inline">(F8)</span></span>
                 </button>
-                <button onClick={finalizar} disabled={!aberto || !linhas.length || salvando} data-testid="pdv-finalizar"
+                <button onClick={finalizar} disabled={!aberto || !linhas.length || salvando || outroOperador} data-testid="pdv-finalizar"
                   className="flex min-w-0 items-center justify-center gap-2 rounded-full bg-acao-600 px-3 py-3.5 text-[15px] font-bold text-white shadow-acao disabled:cursor-not-allowed disabled:opacity-50">
                   <Icone n="confirmar" className="h-5 w-5 shrink-0" />
                   <span className="whitespace-nowrap">{salvando ? 'Finalizando…' : <>Finalizar venda<span className="hidden xl:inline"> (F12)</span></>}</span>

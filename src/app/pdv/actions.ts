@@ -75,7 +75,7 @@ export type ResumoCaixa = {
   vendasQtd: number; vendasTotal: number; dinheiroEsperado: number;
   porForma: { pix: number; cartao: number; dinheiro: number; credito: number };
   movimentos: { id: string; tipo: string; valor: number; motivo: string }[];
-  operador: string; abertaEm: string;
+  operador: string; operadorId: string; abertaEm: string;
 };
 
 export async function listarCaixas(): Promise<CaixaInfo[]> {
@@ -131,6 +131,7 @@ async function resumoSessao(sessaoId: string): Promise<ResumoCaixa | null> {
     porForma,
     movimentos: (movs ?? []).map((m) => ({ id: m.id, tipo: m.tipo, valor: Number(m.valor), motivo: m.motivo })),
     operador: (sess.profiles as unknown as { nome: string })?.nome ?? '',
+    operadorId: sess.operador_id as string,
     abertaEm: sess.aberta_em,
   };
 }

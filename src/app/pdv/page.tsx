@@ -10,5 +10,5 @@ export const dynamic = 'force-dynamic';
 export default async function PagePDV() {
   const s = await exigirSessao(['master', 'gerente', 'caixa']);
   const caixas: CaixaInfo[] = await listarCaixas();
-  return <Pdv caixas={caixas} nome={s.nome} papel={s.papel} deveTrocarSenha={s.deveTrocarSenha} />;
+  return <Pdv caixas={caixas} nome={s.nome} papel={s.papel} usuarioId={s.id} deveTrocarSenha={s.deveTrocarSenha} />;
 }
