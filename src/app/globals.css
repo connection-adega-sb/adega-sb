@@ -34,10 +34,12 @@ html { color-scheme: light; }
 body { background: var(--color-fundo); color: var(--color-ink); font-family: var(--font-sans); }
 :focus-visible { outline: 3px solid var(--color-acao-600); outline-offset: 2px; }
 
-/* Impressão do comprovante do PDV (ReciboVenda): só o papel, em largura de bobina de 80 mm */
+/* Impressão do comprovante do PDV (ReciboVenda): só a cópia presa no <body> (.area-impressao) sai no papel.
+   Serve para impressora comum (A4, ex.: Epson L3250) e para térmica de bobina 80 mm: largura fixa de 76 mm, no topo. */
+.area-impressao { display: none; }
 @media print {
-  body * { visibility: hidden; }
-  .imprimivel, .imprimivel * { visibility: visible; }
-  .imprimivel { position: absolute; left: 0; top: 0; width: 80mm; max-width: 80mm; box-shadow: none; padding: 0; }
-  @page { size: 80mm auto; margin: 3mm; }
+  body > *:not(.area-impressao) { display: none !important; }
+  .area-impressao { display: block; }
+  .area-impressao .papel-recibo { width: 76mm; max-width: 76mm; margin: 0; padding: 0; box-shadow: none; }
+  @page { margin: 4mm; }
 }
