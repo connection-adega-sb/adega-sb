@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { exigirSessao } from '@/lib/sessao';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { cpfValido } from '@/lib/cpf';
+import { normalizarChave, textoPix } from '@/lib/pix';
 
 // Server actions do PDV balcão (modulo-pdv.md §5 e §8).
 // Regras de negócio ficam NO SERVIDOR: preço lido do banco, caixa aberto obrigatório,
@@ -230,7 +231,7 @@ export async function lancarMovimento(_: EstadoCaixa, form: FormData): Promise<E
 // ---------------------------------------------------------------- fechar caixa (CX-07/CX-08)
 const Fechar = z.object({ sessaoId: UUID, valorContado: z.coerce.number().min(0, 'Valor inválido.') });
 
-export type ResultadoFechamento = { erro?: string; diferenca?: number; esperado?: number };
+export type ResultadoFechamento = { erro?: string; diferenca?: number; esperado?: number; sessaoId?: string };
 
 export async function fecharCaixa(_: ResultadoFechamento, form: FormData): Promise<ResultadoFechamento> {
   const s = await exigirSessao(['master', 'gerente', 'caixa']);
@@ -259,7 +260,7 @@ export async function fecharCaixa(_: ResultadoFechamento, form: FormData): Promi
     diferenca, fechada_em: new Date().toISOString(), status: 'fechada',
   }).eq('id', sess.id);
   if (error) return { erro: error.message };
-  return { diferenca, esperado };
+  return { diferenca, esperado, sessaoId: sess.id };
 }
 
 // ---------------------------------------------------------------- finalizar venda (FV-03)
@@ -633,4 +634,115 @@ export async function catalogoSite(): Promise<{ itens: ItemSite[]; categorias: s
   }));
   const categorias = [...new Set(itens.map((i) => i.categoria).filter(Boolean) as string[])].sort();
   return { itens, categorias };
+}
+
+// ---------------------------------------------------------------- PIX: QR estático com valor
+// A chave fica em tenants.config.pix = { chave, nome, cidade } (não é segredo: vai impressa no QR).
+// Só o master cadastra/troca. O QR NÃO confirma pagamento: o caixa confere no banco e clica "PIX recebido".
+export type ChavePix = { chave: string; nome: string; cidade: string; tipo: string };
+
+export async function lerChavePix(): Promise<{ pix: ChavePix | null; podeEditar: boolean }> {
+  const s = await exigirSessao(['master', 'gerente', 'caixa']);
+  const { data } = await supabaseAdmin().from('tenants').select('config').eq('id', s.tenantId).single();
+  const p = (data?.config as { pix?: Partial<ChavePix> } | null)?.pix;
+  const pix = p?.chave && p.nome && p.cidade ? { chave: p.chave, nome: p.nome, cidade: p.cidade, tipo: p.tipo ?? '' } : null;
+  return { pix, podeEditar: s.papel === 'master' };
+}
+
+export async function salvarChavePix(input: { chave: string; nome: string; cidade: string }): Promise<{ erro?: string; pix?: ChavePix }> {
+  const s = await exigirSessao(['master']);
+  const k = normalizarChave(String(input.chave ?? ''));
+  if (!k) return { erro: 'Chave PIX inválida: use CPF, CNPJ, e-mail, celular com DDD ou chave aleatória.' };
+  const nome = textoPix(String(input.nome ?? ''), 25);
+  const cidade = textoPix(String(input.cidade ?? ''), 15);
+  if (nome.length < 2) return { erro: 'Informe o nome do recebedor (como aparece no banco).' };
+  if (cidade.length < 2) return { erro: 'Informe a cidade do recebedor.' };
+  const sb = supabaseAdmin();
+  const { data, error: e1 } = await sb.from('tenants').select('config').eq('id', s.tenantId).single();
+  if (e1) return { erro: 'Não foi possível ler a configuração da empresa.' };
+  const pix: ChavePix = { chave: k.chave, nome, cidade, tipo: k.tipo };
+  const config = { ...((data?.config as Record<string, unknown>) ?? {}), pix };
+  const { error } = await sb.from('tenants').update({ config }).eq('id', s.tenantId);
+  if (error) return { erro: 'Não foi possível salvar a chave PIX.' };
+  return { pix };
+}
+
+// ---------------------------------------------------------------- relatório de fechamento (impresso)
+// Tudo que o dono confere no fim do turno: abertura, vendas por forma, descontos, sangrias/suprimentos,
+// recebimentos de crédito, esperado × contado, diferença e produtos vendidos. Caixa só vê a própria sessão.
+export type RelatorioFechamento = {
+  sessaoId: string; caixa: string; local: string; operador: string; status: 'aberta' | 'fechada';
+  abertaEm: string; fechadaEm: string | null; emitidoEm: string; emitidoPor: string;
+  valorAbertura: number; vendasQtd: number; vendasBruto: number; descontos: number; vendasTotal: number; ticketMedio: number;
+  porForma: { pix: number; cartao: number; dinheiro: number; credito: number };
+  qtdPorForma: { pix: number; cartao: number; dinheiro: number; credito: number };
+  movimentos: { tipo: string; valor: number; motivo: string; quando: string }[];
+  sangrias: number; suprimentos: number;
+  recebCredito: { pix: number; cartao: number; dinheiro: number };
+  esperado: number; contado: number | null; diferenca: number | null;
+  produtos: { nome: string; qtd: number; total: number }[];
+};
+
+export async function relatorioFechamento(sessaoId: string): Promise<{ erro?: string; r?: RelatorioFechamento }> {
+  const s = await exigirSessao(['master', 'gerente', 'caixa']);
+  if (!UUID.safeParse(sessaoId).success) return { erro: 'Sessão inválida.' };
+  const sb = supabaseAdmin();
+  const { data: sess } = await sb.from('caixa_sessoes')
+    .select('id, tenant_id, status, valor_abertura, valor_esperado, valor_contado, diferenca, aberta_em, fechada_em, operador_id, profiles(nome), caixas(nome), locais(nome)')
+    .eq('id', sessaoId).maybeSingle();
+  if (!sess || sess.tenant_id !== s.tenantId) return { erro: 'Sessão não encontrada.' };
+  if (s.papel === 'caixa' && sess.operador_id !== s.id) return { erro: 'Você só imprime o fechamento do seu caixa.' };
+
+  const [{ data: vendas }, { data: movs }, { data: rec }] = await Promise.all([
+    sb.from('vendas').select('id, subtotal, desconto, total, forma_pagamento').eq('caixa_sessao_id', sessaoId),
+    sb.from('caixa_movimentos').select('tipo, valor, motivo, criado_em').eq('sessao_id', sessaoId).order('criado_em'),
+    sb.from('credito_pagamentos').select('valor, forma').eq('caixa_sessao_id', sessaoId),
+  ]);
+  const porForma = { pix: 0, cartao: 0, dinheiro: 0, credito: 0 };
+  const qtdPorForma = { pix: 0, cartao: 0, dinheiro: 0, credito: 0 };
+  let bruto = 0, descontos = 0, total = 0;
+  for (const v of vendas ?? []) {
+    const f = v.forma_pagamento as keyof typeof porForma;
+    if (f in porForma) { porForma[f] += Number(v.total); qtdPorForma[f] += 1; }
+    bruto += Number(v.subtotal); descontos += Number(v.desconto); total += Number(v.total);
+  }
+  const recebCredito = { pix: 0, cartao: 0, dinheiro: 0 };
+  for (const p of rec ?? []) { const f = p.forma as keyof typeof recebCredito; if (f in recebCredito) recebCredito[f] += Number(p.valor); }
+  let sangrias = 0, suprimentos = 0;
+  for (const m of movs ?? []) { if (m.tipo === 'sangria') sangrias += Number(m.valor); else suprimentos += Number(m.valor); }
+
+  // produtos vendidos no turno (em lotes de 200 vendas para não estourar a URL)
+  const ids = (vendas ?? []).map((v) => v.id as string);
+  const agg = new Map<string, { nome: string; qtd: number; total: number }>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: itens } = await sb.from('venda_itens').select('produto_id, quantidade, subtotal, produtos(nome)').in('venda_id', ids.slice(i, i + 200));
+    for (const it of itens ?? []) {
+      const prod = Array.isArray(it.produtos) ? it.produtos[0] : it.produtos;
+      const a = agg.get(it.produto_id as string) ?? { nome: (prod as { nome?: string } | null)?.nome ?? '?', qtd: 0, total: 0 };
+      a.qtd += Number(it.quantidade); a.total += Number(it.subtotal);
+      agg.set(it.produto_id as string, a);
+    }
+  }
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const esperado = sess.status === 'fechada' && sess.valor_esperado !== null ? Number(sess.valor_esperado)
+    : r2(Number(sess.valor_abertura) + porForma.dinheiro + suprimentos - sangrias);
+  const um = <T,>(x: unknown) => (Array.isArray(x) ? x[0] : x) as T | null;
+  return { r: {
+    sessaoId, caixa: um<{ nome: string }>(sess.caixas)?.nome ?? '', local: um<{ nome: string }>(sess.locais)?.nome ?? '',
+    operador: um<{ nome: string }>(sess.profiles)?.nome ?? '', status: sess.status as 'aberta' | 'fechada',
+    abertaEm: sess.aberta_em as string, fechadaEm: (sess.fechada_em as string | null) ?? null,
+    emitidoEm: new Date().toISOString(), emitidoPor: s.nome,
+    valorAbertura: Number(sess.valor_abertura), vendasQtd: vendas?.length ?? 0,
+    vendasBruto: r2(bruto), descontos: r2(descontos), vendasTotal: r2(total),
+    ticketMedio: vendas?.length ? r2(total / vendas.length) : 0,
+    porForma: { pix: r2(porForma.pix), cartao: r2(porForma.cartao), dinheiro: r2(porForma.dinheiro), credito: r2(porForma.credito) },
+    qtdPorForma,
+    movimentos: (movs ?? []).map((m) => ({ tipo: m.tipo as string, valor: Number(m.valor), motivo: (m.motivo as string) ?? '', quando: m.criado_em as string })),
+    sangrias: r2(sangrias), suprimentos: r2(suprimentos),
+    recebCredito: { pix: r2(recebCredito.pix), cartao: r2(recebCredito.cartao), dinheiro: r2(recebCredito.dinheiro) },
+    esperado, contado: sess.valor_contado === null ? null : Number(sess.valor_contado),
+    diferenca: sess.diferenca === null ? null : Number(sess.diferenca),
+    produtos: [...agg.values()].map((p) => ({ ...p, qtd: Math.round(p.qtd * 1000) / 1000, total: r2(p.total) }))
+      .sort((a, b) => b.total - a.total),
+  } };
 }

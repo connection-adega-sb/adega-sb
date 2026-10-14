@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Conta, ContaItem } from '@/app/pdv/actions';
 import { pagarParteConta } from '@/app/pdv/actions';
 import { cpfValido } from '@/lib/cpf';
+import { PixQrModal } from '@/components/PixQrModal';
 
 // Fechamento da "Conta de cliente" (0011): Pagar tudo · Dividir igual · Dividir por itens.
 // Cada pessoa vira uma venda própria (forma, CPF e comprovante). O que é pago sai da conta; a conta fecha
@@ -21,9 +22,9 @@ const FORMAS: [Forma, string][] = [['pix', 'PIX'], ['cartao', 'Cartão'], ['dinh
 const valor = (itens: ContaItem[], q: Record<string, number>) =>
   itens.reduce((s, i) => s + Math.round(i.preco * (q[i.id] ?? 0) * 100) / 100, 0);
 
-export function FecharContaModal({ conta, sessaoId, maior18, pausado, fechar, aoPagar }: {
+export function FecharContaModal({ conta, sessaoId, maior18, pausado, fechar, aoPagar, aoMarcar18 }: {
   conta: Conta; sessaoId: string; maior18: boolean; pausado: boolean;
-  fechar: () => void; aoPagar: (p: PagamentoConta) => Promise<void>;
+  fechar: () => void; aoPagar: (p: PagamentoConta) => Promise<void>; aoMarcar18?: (v: boolean) => void;
 }) {
   const [modo, setModo] = useState<Modo>('tudo');
   const [pessoas, setPessoas] = useState(2);
@@ -33,13 +34,16 @@ export function FecharContaModal({ conta, sessaoId, maior18, pausado, fechar, ao
   const [pagos, setPagos] = useState<{ total: number; forma: Forma }[]>([]);
   const [pagando, setPagando] = useState<number | null>(null);
   const [erro, setErro] = useState('');
+  const [pixPara, setPixPara] = useState<number | null>(null);   // pessoa vendo o QR do PIX
+  const [ok18, setOk18] = useState(maior18);
   const temCliente = !!conta.clienteId;
+  const temAdulto = conta.itens.some((i) => i.adulto);
 
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (!pausado && e.key === 'Escape' && pagando === null) { e.preventDefault(); e.stopPropagation(); fechar(); } };
+    const h = (e: KeyboardEvent) => { if (!pausado && pixPara === null && e.key === 'Escape' && pagando === null) { e.preventDefault(); e.stopPropagation(); fechar(); } };
     window.addEventListener('keydown', h, true);
     return () => window.removeEventListener('keydown', h, true);
-  }, [fechar, pagando, pausado]);
+  }, [fechar, pagando, pausado, pixPara]);
 
   // colunas = pessoas que AINDA vão pagar
   const n = modo === 'tudo' ? 1 : Math.max(1, pessoas);
@@ -82,7 +86,21 @@ export function FecharContaModal({ conta, sessaoId, maior18, pausado, fechar, ao
     return c;
   });
 
-  async function receber(p: number) {
+  // 1º clique: confere; no PIX abre o QR com o valor. A venda só grava em efetivar (depois do "PIX recebido").
+  function receber(p: number) {
+    if (pagando !== null) return;
+    const itens = conta.itens.filter((i) => (matriz[p][i.id] ?? 0) > 0);
+    if (!itens.length) { setErro('Esta pessoa ainda não tem item para pagar.'); return; }
+    if (excesso) { setErro('Tem item com quantidade a mais que a conta: confira a coluna "Falta".'); return; }
+    if (temAdulto && !ok18) { setErro('Item +18: marque "Clientes maiores de 18 anos" no topo.'); return; }
+    const cpf = cpfs[p].replace(/\D/g, '') || null;
+    if (cpf && !cpfValido(cpf)) { setErro(`CPF da pessoa ${p + 1} inválido.`); return; }
+    setErro('');
+    if (formas[p] !== 'credito') { setPixPara(p); return; }   // pergunta "gerar QR Code PIX?" (crédito = fiado, sem QR)
+    void efetivar(p);
+  }
+
+  async function efetivar(p: number, formaUsada?: Forma) {
     if (pagando !== null) return;
     const itens = conta.itens.filter((i) => (matriz[p][i.id] ?? 0) > 0).map((i) => ({ itemId: i.id, qtd: matriz[p][i.id] }));
     if (!itens.length) { setErro('Esta pessoa ainda não tem item para pagar.'); return; }
@@ -90,9 +108,10 @@ export function FecharContaModal({ conta, sessaoId, maior18, pausado, fechar, ao
     const cpf = cpfs[p].replace(/\D/g, '') || null;
     if (cpf && !cpfValido(cpf)) { setErro(`CPF da pessoa ${p + 1} inválido.`); return; }
     setErro(''); setPagando(p);
-    const forma = formas[p];
-    const r = await pagarParteConta({ sessaoId, contaId: conta.id, forma, itens, maior18, cpf, clienteId: conta.clienteId });
-    if (r.erro || !r.vendaId) { setPagando(null); setErro(r.erro ?? 'Não foi possível receber.'); return; }
+    const forma = formaUsada ?? formas[p];   // pagou pelo QR → vira PIX
+    const r = await pagarParteConta({ sessaoId, contaId: conta.id, forma, itens, maior18: ok18, cpf, clienteId: conta.clienteId });
+    if (r.erro || !r.vendaId) { setPagando(null); setPixPara(null); setErro(r.erro ?? 'Não foi possível receber.'); return; }
+    setPixPara(null);
     const pago = {
       vendaId: r.vendaId, quando: r.quando ?? new Date().toISOString(), forma, cpf, total: r.total ?? valor(conta.itens, matriz[p]),
       itens: conta.itens.filter((i) => (matriz[p][i.id] ?? 0) > 0).map((i) => ({ nome: i.nome, qtd: matriz[p][i.id], preco: i.preco })),
@@ -120,9 +139,20 @@ export function FecharContaModal({ conta, sessaoId, maior18, pausado, fechar, ao
           </div>
           <div className="text-right">
             <p className="text-2xl font-extrabold tabular-nums text-acao-700" data-testid="conta-total">{brl(conta.total)}</p>
-            <button type="button" onClick={fechar} className="text-xs font-bold text-ink-soft hover:text-estrutura" data-testid="conta-fechar-voltar">Voltar (Esc)</button>
+            <button type="button" onClick={fechar} disabled={pagando !== null}
+              className="mt-1 rounded-full border border-estrutura/40 px-3 py-1.5 text-xs font-bold text-estrutura hover:bg-fundo disabled:opacity-50"
+              data-testid="conta-fechar-voltar">← Voltar para a conta (Esc)</button>
           </div>
         </div>
+
+        {temAdulto && (
+          <label className={`mx-5 mt-4 flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold ${ok18 ? 'bg-ok/10 text-ok' : 'bg-bad/10 text-bad'}`}
+            data-testid="conta-ok18">
+            <input type="checkbox" className="h-4 w-4" checked={ok18} data-testid="conta-ok18-check"
+              onChange={(e) => { setOk18(e.target.checked); aoMarcar18?.(e.target.checked); setErro(''); }} />
+            Tem item +18: confirmo que os clientes são maiores de 18 anos
+          </label>
+        )}
 
         <div className="flex flex-wrap items-center gap-2 px-5 pt-4">
           {([['tudo', 'Pagar tudo'], ['igual', 'Dividir igual'], ['itens', 'Dividir por itens']] as const).map(([id, rot]) => (
@@ -215,6 +245,14 @@ export function FecharContaModal({ conta, sessaoId, maior18, pausado, fechar, ao
           {modo === 'itens' && <p>Use − e + para dizer quanto cada pessoa paga de cada item. &quot;Falta&quot; mostra o que ainda não tem dono.</p>}
         </div>
       </div>
+      {pixPara !== null && (
+        <PixQrModal valor={valor(conta.itens, matriz[pixPara] ?? {})} forma={formas[pixPara]}
+          descricao={`Conta ${conta.nome}${modo === 'tudo' ? '' : ` · pessoa ${pixPara + 1}`}`}
+          txid={`CONTA${conta.id.replace(/-/g, '').slice(0, 10)}${pixPara + 1}`}
+          pendente={pagando !== null}
+          confirmar={(f) => { if (pixPara !== null) void efetivar(pixPara, f); }}
+          voltar={() => setPixPara(null)} />
+      )}
     </div>
   );
 }

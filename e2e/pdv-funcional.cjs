@@ -43,6 +43,18 @@ for (const k of ['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_K
 // ---------------------------------------------------------------- banco (admin)
 const adm = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SECRET_KEY, { auth: { persistSession: false } });
 
+// 0012: liga/desliga a trava de estoque negativo da empresa (tenants.config.estoque.permitir_negativo)
+async function travaNegativo(ligar) {
+  const { data: t, error } = await adm.from('tenants').select('id, config').eq('cnpj', '43.466.024/0001-43').single();
+  if (error) throw new Error('tenant para a trava de estoque: ' + error.message);
+  const cfg = { ...(t.config || {}) };
+  const est = { ...(cfg.estoque || {}) };
+  if (ligar) est.permitir_negativo = false; else delete est.permitir_negativo;
+  cfg.estoque = est;
+  const { error: eu } = await adm.from('tenants').update({ config: cfg }).eq('id', t.id);
+  if (eu) throw new Error('não consegui mudar a trava de estoque: ' + eu.message);
+}
+
 async function garantirUsuario() {
   const { data: t, error: et } = await adm.from('tenants').select('id').eq('cnpj', '43.466.024/0001-43').single();
   if (et) throw new Error('tenant ADEGA SB não encontrado (0001 aplicada?): ' + et.message);
@@ -138,6 +150,15 @@ async function fecharPainel(pg) {
   await pg.keyboard.press('Escape');
   await pg.getByTestId('pdv-painel').waitFor({ state: 'detached', timeout: 5000 });
 }
+// o relatório de fechamento abre sozinho ao fechar o turno: lê o papel e fecha (Esc)
+let ultimoRelatorio = '';
+async function fecharRelatorio(pg) {
+  const rel = pg.getByTestId('pdv-relatorio');
+  try { await pg.getByTestId('pdv-relatorio-papel').waitFor({ timeout: 15000 }); } catch { ultimoRelatorio = ''; return; }
+  ultimoRelatorio = limpa(await pg.getByTestId('pdv-relatorio-papel').innerText());
+  await pg.keyboard.press('Escape');
+  await rel.waitFor({ state: 'detached', timeout: 5000 });
+}
 // fecha o caixa com o valor EXATO esperado (contado = esperado → "Caixa confere.")
 async function fecharCaixa(pg) {
   await pg.keyboard.press('F8');                      // funciona também no mobile (comanda escondida)
@@ -153,6 +174,7 @@ async function fecharCaixa(pg) {
     throw new Error('fechamento sem resultado' + (motivo ? ' — servidor respondeu: ' + motivo : '') + ' | ' + e.message.split('\n')[0]);
   }
   const resultado = (await pg.getByTestId('pdv-resultado-fechamento').innerText()).trim();
+  await fecharRelatorio(pg);
   await pg.getByTestId('pdv-resultado-ok').click();
   await pg.waitForFunction(() => {
     const el = document.querySelector('[data-testid="pdv-status"]');
@@ -166,15 +188,40 @@ const aviso = (pg) => pg.getByTestId('pdv-aviso').innerText();
 const digitar = (pg, t) => pg.getByTestId('pdv-busca').pressSequentially(t, { delay: 40 });
 // F12 → "CPF na nota?" (Enter; com cpf, digita antes) → comprovante (lê o texto e fecha com Enter).
 // Validação local que barra antes do modal (comanda vazia, +18) → volta sem nada. Recusa do servidor → modal fecha sem comprovante.
+// "Gerar QR Code PIX?" (toda forma menos crédito): opc.qr = gera o QR e confirma "PIX recebido"; senão "sem QR"
+async function receberPix(pg, opc = {}) {
+  const pix = pg.getByTestId('pdv-pix-modal');
+  try { await pix.waitFor({ timeout: 4000 }); } catch { return; }
+  if (opc.qr) {
+    await pg.getByTestId('pix-gerar').click();
+    try { await pg.getByTestId('pix-qr').waitFor({ timeout: 8000 }); ultimoQr = true; } catch { ultimoQr = false; }
+    await pg.getByTestId('pix-confirmar').click();
+  } else {
+    await pg.getByTestId('pix-sem-qr').click();
+  }
+  await pix.waitFor({ state: 'detached', timeout: 25000 });
+}
+
+// chave PIX de teste (CNPJ da própria ADEGA SB) só durante o P17; devolve a configuração anterior
+async function chavePixTeste(ligar) {
+  const { data: t } = await adm.from('tenants').select('id, config').eq('cnpj', '43.466.024/0001-43').single();
+  const cfg = { ...(t.config || {}) };
+  if (ligar) { chavePixTeste.antes = cfg.pix ?? null; cfg.pix = { chave: '43466024000143', nome: 'ADEGA SB', cidade: 'SAO BERNARDO', tipo: 'cnpj' }; }
+  else if (chavePixTeste.antes) cfg.pix = chavePixTeste.antes; else delete cfg.pix;
+  await adm.from('tenants').update({ config: cfg }).eq('id', t.id);
+}
+
 let ultimoRecibo = null;
-async function vender(pg, cpf) {
-  ultimoRecibo = null;
+let ultimoQr = false;   // o QR PIX apareceu na última venda?
+async function vender(pg, cpf, opc = {}) {
+  ultimoRecibo = null; ultimoQr = false;
   await pg.keyboard.press('F12');
   const modal = pg.getByTestId('pdv-cpf-modal');
   try { await modal.waitFor({ timeout: 4000 }); } catch { return null; }
   if (cpf) await pg.getByTestId('pdv-cpf').fill(cpf);
   await pg.getByTestId('pdv-cpf').press('Enter');
   await modal.waitFor({ state: 'detached', timeout: 25000 });
+  await receberPix(pg, opc);
   const recibo = pg.getByTestId('pdv-recibo');
   if (!(await recibo.count())) return null;
   ultimoRecibo = (await pg.getByTestId('pdv-recibo-papel').innerText()).replace(/[\u00A0\u202F]/g, ' ');
@@ -269,10 +316,14 @@ let browser = null, srv = null;
     await esperaLinhas(pg, 2);
     await check('P13', 'comanda com 2 linhas (cerveja 5 + rosé 10)', async () => (await qtdLinhas(pg)) === 2);
     await pg.getByTestId('pdv-maior18').getByRole('checkbox').check();
-    await vender(pg);
-    await pg.getByTestId('pdv-aviso').filter({ hasText: 'Estoque insuficiente' }).waitFor({ timeout: 20000 });
-    await check('P14', 'servidor recusa estoque negativo e mantém a comanda (FV-03)', async () =>
-      (await qtdLinhas(pg)) === 2 && (await aviso(pg)).includes('Estoque insuficiente'));
+    // 0012: venda pode negativar o estoque (padrão). P14 liga a trava da empresa só durante o teste.
+    await travaNegativo(true);
+    try {
+      await vender(pg);
+      await pg.getByTestId('pdv-aviso').filter({ hasText: 'Estoque insuficiente' }).waitFor({ timeout: 20000 });
+      await check('P14', 'empresa com trava (permitir_negativo=false): servidor recusa e mantém a comanda (FV-03/0012)', async () =>
+        (await qtdLinhas(pg)) === 2 && (await aviso(pg)).includes('Estoque insuficiente'));
+    } finally { await travaNegativo(false); }
     await pg.getByTestId('pdv-maior18').getByRole('checkbox').uncheck();
     await pg.keyboard.press('F12');
     await pg.getByTestId('pdv-aviso').filter({ hasText: '+18' }).waitFor({ timeout: 8000 });
@@ -290,7 +341,9 @@ let browser = null, srv = null;
     await digitar(pg, '7898107'); await pg.getByTestId('pdv-busca').press('Enter');
     await esperaQtd(pg, 1);
     await pg.getByTestId('pdv-maior18').getByRole('checkbox').check();
-    await vender(pg, '52998224725');   // "CPF na nota?" com CPF válido (P42 confere no banco)
+    await chavePixTeste(true);
+    try { await vender(pg, '52998224725', { qr: true }); }   // "CPF na nota?" com CPF válido (P42) + QR PIX (P48)
+    finally { await chavePixTeste(false); }
     // se não vier "Venda finalizada", diz POR QUÊ (sem aviso = a promise do finalizar rejeitou)
     try {
       await pg.getByTestId('pdv-aviso').filter({ hasText: 'Venda finalizada' }).waitFor({ timeout: 20000 });
@@ -301,6 +354,7 @@ let browser = null, srv = null;
     }
     await check('P17', 'venda finalizada: aviso "R$ 4,49 no PIX" e comanda zerada (FV-04)', async () =>
       limpa(await aviso(pg)).includes('Venda finalizada: R$ 4,49 no PIX') && (await qtdLinhas(pg)) === 0);
+    await check('P48', 'PIX: "Gerar QR Code?" → QR com o valor aparece e a venda só grava no "PIX recebido"', async () => ultimoQr);
 
     await check('P18', 'banco: baixa de estoque −1, venda origem pdv/canal varejo, 1 item e movimento de saída (FV-03)', async () => {
       const depois = await estoque(lojaId, '7898107');
@@ -368,6 +422,10 @@ let browser = null, srv = null;
     await pg.getByTestId('pdv-resultado-fechamento').waitFor({ timeout: 15000 });
     await check('P22', 'fechar com contado = esperado → "Caixa confere." (CX-07)', async () =>
       (await pg.getByTestId('pdv-resultado-fechamento').innerText()).trim() === 'Caixa confere.');
+    await fecharRelatorio(pg);
+    await check('P49', 'relatório de fechamento abre sozinho: vendas, PIX R$ 4,49, sangria −R$ 10,00, esperado R$ 190,00 e "CAIXA CONFERE"', async () =>
+      ultimoRelatorio.includes('FECHAMENTO DE CAIXA') && ultimoRelatorio.includes('R$ 4,49') && ultimoRelatorio.includes('-R$ 10,00')
+      && ultimoRelatorio.includes('R$ 190,00') && ultimoRelatorio.includes('CAIXA CONFERE'));
     await pg.getByTestId('pdv-resultado-ok').click();
     await pg.waitForFunction(() => document.querySelector('[data-testid="pdv-status"]')?.textContent.includes('FECHADO'), undefined, { timeout: 15000 });
     await check('P23', 'sessão gravada fechada com esperado = contado = 190 e diferença 0', async () => {
@@ -640,8 +698,19 @@ let browser = null, srv = null;
       await esperaTotalConta(p9, 'R$ 13,47');
       await digitar(p9, '2*' + codigoNovo); await p9.getByTestId('pdv-busca').press('Enter');
       await esperaTotalConta(p9, 'R$ 29,27');
-      const { data: c } = await adm.from('comandas').select('total, origem, status').eq('nome', nomeConta).single();
-      return Number(c.total) === 29.27 && c.origem === 'pdv' && c.status === 'aberta' && (await totalConta(p9)).includes('R$ 29,27');
+      // a tela muda na hora (otimista); o banco grava atrás — espera até 15 s
+      let c = null;
+      for (let k = 0; k < 30; k++) {
+        ({ data: c } = await adm.from('comandas').select('total, origem, status').eq('nome', nomeConta).single());
+        if (c && Number(c.total) === 29.27) break;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      await esperaTotalConta(p9, 'R$ 29,27');   // tela depois do banco confirmar (sem voltar ao total antigo)
+      const tela = await totalConta(p9);
+      if (!(Number(c.total) === 29.27 && c.origem === 'pdv' && c.status === 'aberta' && tela.includes('R$ 29,27'))) {
+        throw new Error(`banco ${c.total}/${c.origem}/${c.status} · tela ${limpa(tela)}`);
+      }
+      return true;
     });
     await check('P45', 'Guardar conta: volta para a venda de balcão e a conta continua no quadro', async () => {
       await p9.getByTestId('pdv-conta-guardar').click();
@@ -679,12 +748,14 @@ let browser = null, srv = null;
       const v1 = limpa(await p9.getByTestId('conta-valor-1').innerText());
       if (falta !== 'R$ 0,00' || v0 !== 'R$ 16,88' || v1 !== 'R$ 12,39') throw new Error(`divisão: falta ${falta} · ${v0} · ${v1}`);
       await p9.getByTestId('conta-receber-0').click();
+      await receberPix(p9);
       await p9.getByTestId('pdv-recibo').waitFor({ timeout: 25000 });
       const papel1 = limpa(await p9.getByTestId('pdv-recibo-papel').innerText());
       await p9.keyboard.press('Enter');
       await p9.getByTestId('pdv-recibo').waitFor({ state: 'detached', timeout: 5000 });
       await p9.getByTestId('conta-forma-0').selectOption('dinheiro');
       await p9.getByTestId('conta-receber-0').click();
+      await receberPix(p9);
       await p9.getByTestId('pdv-recibo').waitFor({ timeout: 25000 });
       await p9.keyboard.press('Enter');
       await p9.getByTestId('pdv-recibo').waitFor({ state: 'detached', timeout: 5000 });

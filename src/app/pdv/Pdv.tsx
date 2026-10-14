@@ -12,6 +12,8 @@ import {
 import { CadastroRapidoProduto } from '@/components/CadastroRapidoProduto';
 import { ClienteSeletor } from '@/components/ClienteSeletor';
 import { CpfNotaModal } from '@/components/CpfNotaModal';
+import { PixQrModal } from '@/components/PixQrModal';
+import { RelatorioFechamento } from '@/components/RelatorioFechamento';
 import { ReciboVenda, type ReciboDados } from '@/components/ReciboVenda';
 import { FecharContaModal, type PagamentoConta } from '@/components/FecharContaModal';
 import { creditoCliente, type Cliente, type CreditoCliente } from '@/app/clientes/actions';
@@ -64,6 +66,7 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
   const [seletorConta, setSeletorConta] = useState(false);
   const [contaMaior18, setContaMaior18] = useState<Record<string, boolean>>({});
   const [fecharContaAberto, setFecharContaAberto] = useState(false);
+  const [pixVenda, setPixVenda] = useState<{ cpf: string | null; txid: string } | null>(null);   // QR do PIX antes de gravar a venda
 
   // busca
   const [termo, setTermo] = useState('');
@@ -118,14 +121,66 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
   const localAtual = caixas.find((c) => c.id === caixaId)?.local_id;
 
   // contas abertas do local (quadro abaixo da área do PDV)
+  // contaSeq muda a cada mudança otimista: uma leitura do banco que começou ANTES dela chega velha e é ignorada
+  // (senão o quadro "voltava" para o total antigo por um instante enquanto o leitor ainda gravava)
+  const contaSeq = useRef(0);
+  const jobsConta = useRef(new Set<Promise<unknown>>());
+  const timersConta = useRef(new Map<string, { t: ReturnType<typeof setTimeout>; rodar: () => void }>());
   const recarregarContas = useCallback(async () => {
     if (!localAtual || !aberto) { setContas([]); return [] as Conta[]; }
+    const seq = contaSeq.current;
     const r = await listarContas(localAtual);
+    if (seq !== contaSeq.current || jobsConta.current.size || timersConta.current.size) return r;
     setContas(r);
     setContaId((id) => (id && r.some((c) => c.id === id) ? id : null));
     return r;
   }, [localAtual, aberto]);
   useEffect(() => { void recarregarContas(); }, [recarregarContas]);
+
+  // Conta: a tela muda NA HORA (otimista) e o banco grava atrás. O −/+ espera 350 ms parado e manda só a
+  // quantidade final; o quadro recarrega quando não sobra nada pendente. Fechar a conta espera tudo gravar.
+  const otimista = useCallback((id: string, fn: (itens: Conta['itens']) => Conta['itens']) => {
+    contaSeq.current += 1;
+    setContas((prev) => prev.map((c) => {
+      if (c.id !== id) return c;
+      const itens = fn(c.itens);
+      return { ...c, itens, total: Math.round(itens.reduce((t, i) => t + i.subtotal, 0) * 100) / 100 };
+    }));
+  }, []);
+  const rodarConta = useCallback((job: () => Promise<{ erro?: string }>) => {
+    const pr = job().then(async (r) => {
+      if (r.erro) setAviso({ tipo: 'erro', texto: r.erro.includes('+18') ? 'Item +18: marque "maiores de 18 anos" na conta.' : r.erro });
+      return r;
+    }).finally(() => {
+      jobsConta.current.delete(pr);
+      if (!jobsConta.current.size && !timersConta.current.size) void recarregarContas();
+    });
+    jobsConta.current.add(pr);
+    return pr;
+  }, [recarregarContas]);
+  const mudarQtdConta = useCallback((contaAlvo: string, item: Conta['itens'][number], nova: number) => {
+    if (!sessao || item.id.startsWith('tmp-')) return;
+    const qtd = Math.max(0, nova);
+    otimista(contaAlvo, (itens) => itens.flatMap((i) => (i.id !== item.id ? [i]
+      : qtd === 0 ? [] : [{ ...i, qtd, subtotal: Math.round(i.preco * qtd * 100) / 100 }])));
+    const antes = timersConta.current.get(item.id);
+    if (antes) clearTimeout(antes.t);
+    const rodar = () => {
+      timersConta.current.delete(item.id);
+      void rodarConta(() => ajustarItemConta({ sessaoId: sessao.sessaoId, contaId: contaAlvo, itemId: item.id, qtd }));
+    };
+    timersConta.current.set(item.id, { t: setTimeout(rodar, 350), rodar });
+  }, [sessao, otimista, rodarConta]);
+  const gravarPendentesConta = useCallback(async () => {
+    for (const [, v] of timersConta.current) { clearTimeout(v.t); v.rodar(); }
+    while (jobsConta.current.size) await Promise.all([...jobsConta.current]);
+  }, []);
+  async function abrirFechamento() {
+    if (!conta) return;
+    await gravarPendentesConta();
+    const lista = await recarregarContas();
+    if (lista.find((c) => c.id === conta.id)?.itens.length) setFecharContaAberto(true);
+  }
   const conta = contas.find((c) => c.id === contaId) ?? null;
 
   // ------------------------------------------------ busca com debounce (PDV-02)
@@ -145,12 +200,15 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
     if (!aberto) return;
     if (contaId && sessao) {   // conta de cliente ativa: o item vai direto para a conta (gravado no banco)
       setTermo(''); setResultados([]); buscaRef.current?.focus();
-      void adicionarNaConta({ sessaoId: sessao.sessaoId, contaId, produtoId: p.id, qtd: qtdExtra, maior18: !!contaMaior18[contaId] })
-        .then(async (r) => {
-          if (r.erro) setAviso({ tipo: 'erro', texto: r.erro.includes('+18') ? 'Item +18: marque "maiores de 18 anos" na conta.' : r.erro });
-          else setAviso(null);
-          await recarregarContas();
-        });
+      setAviso(null);
+      // aparece na hora; o banco confirma atrás (item novo fica "tmp-" até o quadro recarregar)
+      otimista(contaId, (itens) => {
+        const i = itens.findIndex((x) => x.produtoId === p.id);
+        if (i >= 0) return itens.map((x, k) => (k !== i ? x : { ...x, qtd: x.qtd + qtdExtra, subtotal: Math.round(x.preco * (x.qtd + qtdExtra) * 100) / 100 }));
+        return [...itens, { id: `tmp-${p.id}-${Date.now()}`, produtoId: p.id, nome: p.nome, qtd: qtdExtra, preco: p.preco_varejo,
+          subtotal: Math.round(p.preco_varejo * qtdExtra * 100) / 100, adulto: p.adulto }];
+      });
+      void rodarConta(() => adicionarNaConta({ sessaoId: sessao.sessaoId, contaId, produtoId: p.id, qtd: qtdExtra, maior18: !!contaMaior18[contaId] }));
       return;
     }
     if (p.estoque <= 0 && !p.fumigeno) { /* segue: estoque negativo é recusado no servidor */ }
@@ -167,7 +225,7 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
     });
     setTermo(''); setResultados([]);
     buscaRef.current?.focus();
-  }, [aberto, contaId, sessao, contaMaior18, recarregarContas]);
+  }, [aberto, contaId, sessao, contaMaior18, otimista, rodarConta]);
 
   // cadastro feito no MEIO da venda → o produto entra na comanda na hora e a operação segue
   const aoCadastrar = useCallback((p: ProdutoNovo) => {
@@ -207,7 +265,7 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
       // conta de cliente: abrir (nome) e fechar (dividir) seguram o teclado
       if (novaConta || fecharContaAberto) return;
       // "CPF na nota?" e comprovante seguram o teclado (Enter/Esc tratados neles)
-      if (cpfModal || recibo) return;
+      if (cpfModal || recibo || pixVenda) return;
       // módulos do topo abertos: cada um fecha sozinho no Esc (senão o Esc limparia a busca)
       if (precoAberto || siteAberto || vendasAberta) return;
       if (e.key === 'F2') { e.preventDefault(); buscaRef.current?.focus(); }
@@ -215,7 +273,7 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
       else if (e.key === 'F9') { e.preventDefault(); setVendasAberta(true); }
       else if (e.key === 'F4') { e.preventDefault(); if (aberto) setSeletorCliente(true); }
       else if (e.key === 'F6') { e.preventDefault(); if (aberto && !outroOperador) setNovaConta({ nome: '', maior18: false, cliente: null }); }
-      else if (e.key === 'F12') { e.preventDefault(); if (conta) { if (conta.itens.length) setFecharContaAberto(true); } else finalizar(); }
+      else if (e.key === 'F12') { e.preventDefault(); if (conta) { if (conta.itens.length) void abrirFechamento(); } else finalizar(); }
       else if (e.key === 'Escape') {
         if (painelAberto) setPainelAberto(false);
         else if (drawer) setDrawer(false);
@@ -262,31 +320,40 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
     setCpfModal(true);   // última pergunta antes de gravar: "CPF na nota?"
   }
 
-  async function confirmarVenda(cpf: string | null) {
+  // Depois do "CPF na nota?": pergunta se gera o QR PIX; a venda só grava na confirmação
+  function confirmarVenda(cpf: string | null) {
     if (!aberto || !sessao || salvando) return;
+    // toda forma (menos crédito/fiado) pergunta "gerar QR Code PIX?"; quem paga pelo QR vira venda PIX
+    if (forma !== 'credito') { setCpfModal(false); setPixVenda({ cpf, txid: `PDV${Date.now().toString(36).toUpperCase()}` }); return; }
+    void gravarVenda(cpf);
+  }
+
+  async function gravarVenda(cpf: string | null, formaUsada?: typeof forma) {
+    if (!aberto || !sessao || salvando) return;
+    const fp = formaUsada ?? forma;   // QR PIX gerado em outra forma → grava como PIX
     setSalvando(true); setAviso(null);
     const r = await finalizarVendaPdv({
       sessaoId: sessao.sessaoId,
       itens: linhas.map((l) => ({ produto_id: l.produto.id, quantidade: l.qtd })),
-      desconto, forma, maior18, clienteId: cliente?.id ?? null, cpf,
+      desconto, forma: fp, maior18, clienteId: cliente?.id ?? null, cpf,
     });
     setSalvando(false);
-    setCpfModal(false);
+    setCpfModal(false); setPixVenda(null);
     if (r.erro) { setAviso({ tipo: 'erro', texto: r.erro }); buscaRef.current?.focus(); return; }
     // foto da venda para o comprovante ANTES de zerar a comanda
     const dados: ReciboDados = {
       vendaId: r.vendaId ?? '', quando: r.quando ?? new Date().toISOString(),
       operador: sessao.operador || nome, caixa: nomeCaixa,
       itens: linhas.map((l) => ({ nome: l.produto.nome, qtd: l.qtd, preco: l.produto.preco_varejo })),
-      subtotal, desconto, total, forma,
-      recebido: forma === 'dinheiro' && recebido !== '' ? Number(recebido) : null,
+      subtotal, desconto, total, forma: fp,
+      recebido: fp === 'dinheiro' && recebido !== '' ? Number(recebido) : null,
       cliente: cliente?.nome ?? null, cpf: cpf ?? cliente?.cpf ?? null, maior18: temAdulto && maior18,
     };
     // zera a comanda SEM apagar o aviso de sucesso (FV-04) — ordem importava
     const quem = cliente ? ` · ${cliente.nome}` : '';
     limparItens();
     setRecebido('');
-    const rotuloForma = { pix: 'PIX', cartao: 'CARTÃO', dinheiro: 'DINHEIRO', credito: 'CRÉDITO' }[forma];
+    const rotuloForma = { pix: 'PIX', cartao: 'CARTÃO', dinheiro: 'DINHEIRO', credito: 'CRÉDITO' }[fp];
     setAviso({ tipo: 'ok', texto: `Venda finalizada: ${brl(total)} no ${rotuloForma}${quem}` });
     setRecibo(dados);
     await recarregar(caixaId);
@@ -644,10 +711,10 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
                       <p className="mt-0.5 text-xs tabular-nums text-ink-soft">{brl(it.preco)} × {it.qtd.toLocaleString('pt-BR')} = <strong className="text-estrutura">{brl(it.subtotal)}</strong></p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1 rounded-full border border-line p-0.5">
-                      <button aria-label="Diminuir" onClick={() => void ajustarItemConta({ sessaoId: sessao.sessaoId, contaId: conta.id, itemId: it.id, qtd: Math.max(0, Math.ceil(it.qtd) - 1) }).then(recarregarContas)}
+                      <button aria-label="Diminuir" onClick={() => mudarQtdConta(conta.id, it, Math.ceil(it.qtd) - 1)} disabled={it.id.startsWith('tmp-')}
                         className="flex h-7 w-7 items-center justify-center rounded-full text-ink-soft hover:bg-fundo hover:text-estrutura"><Icone n="menos" className="h-3.5 w-3.5" /></button>
                       <span className="w-7 text-center text-xs font-bold tabular-nums text-estrutura">{it.qtd.toLocaleString('pt-BR')}</span>
-                      <button aria-label="Aumentar" onClick={() => void ajustarItemConta({ sessaoId: sessao.sessaoId, contaId: conta.id, itemId: it.id, qtd: Math.floor(it.qtd) + 1 }).then(recarregarContas)}
+                      <button aria-label="Aumentar" onClick={() => mudarQtdConta(conta.id, it, Math.floor(it.qtd) + 1)} disabled={it.id.startsWith('tmp-')}
                         className="flex h-7 w-7 items-center justify-center rounded-full text-ink-soft hover:bg-fundo hover:text-estrutura"><Icone n="mais" className="h-3.5 w-3.5" /></button>
                     </div>
                   </div>
@@ -677,7 +744,7 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
                   className="w-full rounded-full border-[1.5px] border-line bg-white px-4 py-3 text-[14px] font-bold text-estrutura hover:border-estrutura">
                   Guardar conta (continua aberta)
                 </button>
-                <button type="button" onClick={() => { if (conta.itens.length) setFecharContaAberto(true); }} disabled={!conta.itens.length || outroOperador} data-testid="pdv-conta-fechar"
+                <button type="button" onClick={() => { if (conta.itens.length) void abrirFechamento(); }} disabled={!conta.itens.length || outroOperador} data-testid="pdv-conta-fechar"
                   className="w-full rounded-full bg-acao-600 px-4 py-3.5 text-[15px] font-bold text-white shadow-acao disabled:opacity-50">
                   Fechar conta (F12)
                 </button>
@@ -878,6 +945,13 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
           confirmar={confirmarVenda} voltar={() => { setCpfModal(false); buscaRef.current?.focus(); }} />
       )}
 
+      {pixVenda && (
+        <PixQrModal valor={total} forma={forma} descricao={`Venda no balcão · ${linhas.reduce((a, l) => a + l.qtd, 0).toLocaleString('pt-BR')} itens${cliente ? ` · ${cliente.nome}` : ''}`}
+          txid={pixVenda.txid} pendente={salvando}
+          confirmar={(f) => { void gravarVenda(pixVenda.cpf, f); }}
+          voltar={() => { setPixVenda(null); buscaRef.current?.focus(); }} />
+      )}
+
       {novaConta && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-estrutura/60 p-4" role="dialog" aria-modal="true" aria-label="Abrir conta de cliente"
           data-testid="pdv-conta-modal"
@@ -925,6 +999,7 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
 
       {fecharContaAberto && conta && sessao && (
         <FecharContaModal conta={conta} sessaoId={sessao.sessaoId} maior18={!!contaMaior18[conta.id]} pausado={!!recibo}
+          aoMarcar18={(v) => setContaMaior18((m) => ({ ...m, [conta.id]: v }))}
           fechar={() => { setFecharContaAberto(false); buscaRef.current?.focus(); }} aoPagar={aoPagarConta} />
       )}
 
@@ -985,6 +1060,10 @@ function PainelCaixa({ caixa, sessao, turno, papel, nome, aba, setAba, fechar, a
   // caixa fechou → o pai recarrega (sessão vira null) e o resultado fica até "Concluir"
   const difFech = typeof stFech.diferenca === 'number' && !stFech.erro ? stFech.diferenca : null;
   useEffect(() => { if (difFech !== null) aoAbrir(); }, [difFech, aoAbrir]);
+  // relatório impresso: abre sozinho ao fechar o turno; com o caixa aberto vira "leitura parcial"
+  const [relatorio, setRelatorio] = useState<string | null>(null);
+  const fechSessao = stFech.sessaoId;
+  useEffect(() => { if (fechSessao) setRelatorio(fechSessao); }, [fechSessao]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" data-testid="pdv-painel">
@@ -1004,6 +1083,10 @@ function PainelCaixa({ caixa, sessao, turno, papel, nome, aba, setAba, fechar, a
                 : `Falta de ${brl(Math.abs(difFech))}`}
             </p>
             <p className="text-sm text-ink-soft">Esperado {brl(stFech.esperado ?? 0)} · turno encerrado</p>
+            {stFech.sessaoId && (
+              <button type="button" onClick={() => setRelatorio(stFech.sessaoId ?? null)} data-testid="pdv-relatorio-abrir"
+                className="w-full rounded-full border-[1.5px] border-estrutura px-5 py-3 font-extrabold text-estrutura">🖨 Imprimir relatório de fechamento</button>
+            )}
             <button onClick={fechar} data-testid="pdv-resultado-ok"
               className="w-full rounded-full bg-acao-600 px-5 py-3 font-extrabold text-white">Concluir</button>
           </div>
@@ -1089,6 +1172,8 @@ function PainelCaixa({ caixa, sessao, turno, papel, nome, aba, setAba, fechar, a
                 <input name="valorContado" type="number" min={0} step="0.01" required placeholder="Dinheiro contado (R$)"
                   data-testid="pdv-valor-contado" className="w-full rounded-xl border-[1.5px] border-line-input px-3.5 py-2.5 focus:outline-none" />
                 <p role="alert" className="min-h-5 text-sm font-bold text-bad">{stFech.erro}</p>
+                <button type="button" onClick={() => setRelatorio(sessao.sessaoId)} data-testid="pdv-relatorio-parcial"
+                  className="w-full rounded-full border border-line px-5 py-2.5 text-sm font-bold text-estrutura hover:border-estrutura">🖨 Imprimir leitura parcial (sem fechar)</button>
                 <button disabled={pendFech} data-testid="pdv-fechar-submit"
                   className="w-full rounded-full bg-estrutura px-5 py-3 font-extrabold text-white disabled:opacity-50">
                   {pendFech ? 'Fechando…' : `Fechar caixa de ${sessao.operador}`}
@@ -1099,6 +1184,7 @@ function PainelCaixa({ caixa, sessao, turno, papel, nome, aba, setAba, fechar, a
           </>
         )}
       </div>
+      {relatorio && <RelatorioFechamento sessaoId={relatorio} fechar={() => setRelatorio(null)} />}
     </div>
   );
 }
