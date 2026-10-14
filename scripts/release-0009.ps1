@@ -8,7 +8,7 @@
 #   4. commit + push da branch staging
 #   5. espera o CI do commit ficar verde (gh, ate 25 min)
 #   6. banco PRODUCAO: link -> preflight -> db push -> pgTAP 0009 (gate) -> link de volta ao STAGING (sempre)
-#   7. codigo PRODUCAO: pasta de producao -> fetch -> merge --ff-only -> push main (Netlify publica)
+#   7. codigo PRODUCAO: pasta de producao -> fetch -> merge --ff-only -> push main (Vercel publica)
 # Log completo: F:\Projetos\adega-sb-docs\release-0009.log
 # Arquivo ASCII de proposito (PowerShell 5.1 nao le UTF-8 sem BOM).
 
@@ -139,7 +139,7 @@ if ((Rodar 'git fetch' { git fetch origin }) -ne 0) { Falha 'git fetch na produc
 if ((Rodar 'git merge --ff-only' { git merge --ff-only origin/staging }) -ne 0) { Falha 'merge --ff-only na producao' }
 if ((Rodar 'git push origin main' { git push origin main }) -ne 0) { Falha 'git push origin main' }
 $main = (git rev-parse --short HEAD).Trim()
-Ok "main = $main (Netlify publica em ~3 min)"
+Ok "main = $main (Vercel publica em ~2 min: https://adega-sb.vercel.app)"
 Set-Location $STG
 
 Write-Host ''

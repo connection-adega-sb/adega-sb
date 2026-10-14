@@ -49,4 +49,4 @@ A senha inicial aparece uma única vez. Entre em `/login`, troque a senha e crie
 
 ## Produção
 
-Nunca editar código fora do staging. Produção: `https://adega-sb.netlify.app` (Netlify, branch `main`). Ritual de release no AGENTS.md (seção Produção).
+Nunca editar código fora do staging. Produção: `https://adega-sb.vercel.app` (Vercel, branch `main`; até 13/10/2026 era Netlify). Ritual de release no AGENTS.md (seção Produção).

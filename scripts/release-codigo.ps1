@@ -75,6 +75,6 @@ if ((Rodar 'git merge --ff-only' { git merge --ff-only origin/staging }) -ne 0) 
 if ((Rodar 'git push origin main' { git push origin main }) -ne 0) { Falha 'git push origin main' }
 $main = (git rev-parse --short HEAD).Trim()
 Set-Location $STG
-Ok "main = $main (Netlify publica em ~3 min)"
+Ok "main = $main (Vercel publica em ~2 min: https://adega-sb.vercel.app)"
 Write-Host ''; Write-Host "RELEASE CONCLUIDO - main = $main" -ForegroundColor Green
 Log "RELEASE CONCLUIDO - main = $main - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
