@@ -239,10 +239,16 @@ export async function fecharCaixa(_: ResultadoFechamento, form: FormData): Promi
 
   const sb = supabaseAdmin();
   const { data: sess } = await sb.from('caixa_sessoes')
-    .select('id, status, operador_id, valor_abertura').eq('id', p.data.sessaoId).maybeSingle();
+    .select('id, status, operador_id, valor_abertura, local_id').eq('id', p.data.sessaoId).maybeSingle();
   if (!sess) return { erro: 'Sessão não encontrada.' };
   if (sess.status !== 'aberta') return { erro: 'Este caixa já está fechado.' };
   if (sess.operador_id !== s.id && s.papel !== 'master') return { erro: 'Esta sessão é de outro operador.' };
+  // 0011: conta de cliente aberta = consumo ainda não pago → não deixa fechar o caixa
+  const { count: contasAbertas } = await sb.from('comandas').select('id', { count: 'exact', head: true })
+    .eq('local_id', sess.local_id).eq('status', 'aberta').eq('origem', 'pdv');
+  if (contasAbertas) {
+    return { erro: `Há ${contasAbertas} conta${contasAbertas > 1 ? 's' : ''} de cliente aberta${contasAbertas > 1 ? 's' : ''}: receba ou feche antes de fechar o caixa.` };
+  }
 
   const r = await resumoSessao(sess.id);
   const esperado = r?.dinheiroEsperado ?? 0;
@@ -316,6 +322,126 @@ export async function finalizarVendaPdv(dados: {
   return { total: ultima, forma: p.data.forma, vendaId, quando };
 }
 
+// ================================================================ conta de cliente (0011)
+// Consumo no local com o NOME do cliente (como mesa de bar). Cada pessoa que paga vira uma venda própria.
+export type ContaItem = { id: string; produtoId: string; nome: string; qtd: number; preco: number; subtotal: number; adulto: boolean };
+export type Conta = { id: string; nome: string; total: number; abertaEm: string; clienteId: string | null; itens: ContaItem[] };
+
+type LinhaConta = {
+  id: string; nome: string; total: number; aberta_em: string; cliente_id: string | null;
+  comanda_itens: { id: string; produto_id: string; quantidade: number; preco_unit: number; subtotal: number;
+    produtos: { nome: string; adulto: boolean } | { nome: string; adulto: boolean }[] | null }[];
+};
+
+export async function listarContas(localId: string): Promise<Conta[]> {
+  const s = await exigirSessao(['master', 'gerente', 'caixa']);
+  if (!UUID.safeParse(localId).success) return [];
+  if (s.papel !== 'master' && s.papel !== 'gerente' && !s.locais.includes(localId)) return [];
+  const { data } = await supabaseAdmin().from('comandas')
+    .select('id, nome, total, aberta_em, cliente_id, comanda_itens(id, produto_id, quantidade, preco_unit, subtotal, produtos(nome, adulto))')
+    .eq('local_id', localId).eq('status', 'aberta').eq('origem', 'pdv').order('aberta_em');
+  return ((data ?? []) as unknown as LinhaConta[]).map((c) => ({
+    id: c.id, nome: c.nome, total: Number(c.total), abertaEm: c.aberta_em, clienteId: c.cliente_id,
+    itens: (c.comanda_itens ?? []).map((i) => {
+      const prod = Array.isArray(i.produtos) ? i.produtos[0] : i.produtos;
+      return { id: i.id, produtoId: i.produto_id, nome: prod?.nome ?? '?', qtd: Number(i.quantidade),
+        preco: Number(i.preco_unit), subtotal: Number(i.subtotal), adulto: !!prod?.adulto };
+    }).sort((a, b) => a.nome.localeCompare(b.nome)),
+  }));
+}
+
+// a sessão precisa estar aberta e ser do operador (mesma regra do balcão — §8)
+async function sessaoDoOperador(sessaoId: string, usuarioId: string, papel: string) {
+  const { data: sess } = await supabaseAdmin().from('caixa_sessoes')
+    .select('id, status, operador_id, local_id').eq('id', sessaoId).maybeSingle();
+  if (!sess) return { erro: 'Sessão não encontrada.' };
+  if (sess.status !== 'aberta') return { erro: 'Abra o caixa para usar a conta de cliente.' };
+  if (sess.operador_id !== usuarioId && papel !== 'master') return { erro: 'Esta sessão é de outro operador.' };
+  return { sess };
+}
+
+export async function abrirConta(dados: { sessaoId: string; nome: string; clienteId?: string | null }): Promise<{ erro?: string; contaId?: string }> {
+  const s = await exigirSessao(['master', 'gerente', 'caixa']);
+  const p = z.object({ sessaoId: UUID, nome: z.string().trim().min(1, 'Informe o nome da conta.').max(60, 'Nome muito longo (até 60 letras).'),
+    clienteId: UUID.nullable().default(null) }).safeParse(dados);
+  if (!p.success) return { erro: p.error.issues[0].message };
+  const v = await sessaoDoOperador(p.data.sessaoId, s.id, s.papel);
+  if (v.erro) return { erro: v.erro };
+  const { data, error } = await supabaseAdmin().rpc('conta_abrir', {
+    p_sessao: p.data.sessaoId, p_usuario: s.id, p_nome: p.data.nome, p_cliente: p.data.clienteId,
+  });
+  if (error) return { erro: traduzErro(error.message) };
+  return { contaId: data as string };
+}
+
+async function contaDoLocal(contaId: string, localId: string) {
+  const { data } = await supabaseAdmin().from('comandas').select('id, status, origem, local_id').eq('id', contaId).maybeSingle();
+  if (!data || data.origem !== 'pdv' || data.local_id !== localId) return 'Conta não encontrada.';
+  if (data.status !== 'aberta') return 'Esta conta já foi fechada.';
+  return null;
+}
+
+export async function adicionarNaConta(dados: { sessaoId: string; contaId: string; produtoId: string; qtd: number; maior18: boolean }): Promise<{ erro?: string }> {
+  const s = await exigirSessao(['master', 'gerente', 'caixa']);
+  const p = z.object({ sessaoId: UUID, contaId: UUID, produtoId: UUID, qtd: z.number().positive().max(999), maior18: z.boolean() }).safeParse(dados);
+  if (!p.success) return { erro: p.error.issues[0].message };
+  const v = await sessaoDoOperador(p.data.sessaoId, s.id, s.papel);
+  if (v.erro || !v.sess) return { erro: v.erro };
+  const e = await contaDoLocal(p.data.contaId, v.sess.local_id);
+  if (e) return { erro: e };
+  const { error } = await supabaseAdmin().rpc('comanda_adicionar', {
+    p_comanda: p.data.contaId, p_produto: p.data.produtoId, p_quantidade: p.data.qtd, p_tipo_item: 'revenda', p_maior18: p.data.maior18,
+  });
+  if (error) return { erro: traduzErro(error.message) };
+  return {};
+}
+
+export async function ajustarItemConta(dados: { sessaoId: string; contaId: string; itemId: string; qtd: number }): Promise<{ erro?: string }> {
+  const s = await exigirSessao(['master', 'gerente', 'caixa']);
+  const p = z.object({ sessaoId: UUID, contaId: UUID, itemId: UUID, qtd: z.number().min(0).max(999) }).safeParse(dados);
+  if (!p.success) return { erro: p.error.issues[0].message };
+  const v = await sessaoDoOperador(p.data.sessaoId, s.id, s.papel);
+  if (v.erro || !v.sess) return { erro: v.erro };
+  const e = await contaDoLocal(p.data.contaId, v.sess.local_id);
+  if (e) return { erro: e };
+  const sb = supabaseAdmin();
+  const { data: it } = await sb.from('comanda_itens').select('comanda_id').eq('id', p.data.itemId).maybeSingle();
+  if (!it || it.comanda_id !== p.data.contaId) return { erro: 'Item não pertence a esta conta.' };
+  const { error } = await sb.rpc('conta_ajustar_item', { p_item: p.data.itemId, p_quantidade: p.data.qtd });
+  if (error) return { erro: traduzErro(error.message) };
+  return {};
+}
+
+export async function pagarParteConta(dados: {
+  sessaoId: string; contaId: string; forma: 'pix' | 'cartao' | 'dinheiro' | 'credito';
+  itens: { itemId: string; qtd: number }[]; maior18: boolean; clienteId?: string | null; cpf?: string | null;
+}): Promise<{ erro?: string; vendaId?: string; quando?: string; total?: number }> {
+  const s = await exigirSessao(['master', 'gerente', 'caixa']);
+  const p = z.object({
+    sessaoId: UUID, contaId: UUID, forma: z.enum(['pix', 'cartao', 'dinheiro', 'credito']),
+    itens: z.array(z.object({ itemId: UUID, qtd: z.number().positive().max(999) })).min(1, 'Escolha ao menos um item para esta pessoa.'),
+    maior18: z.boolean(), clienteId: UUID.nullable().default(null),
+    cpf: z.string().regex(/^\d{11}$/, 'CPF inválido.').nullable().default(null),
+  }).safeParse(dados);
+  if (!p.success) return { erro: p.error.issues[0].message };
+  if (p.data.forma === 'credito' && !p.data.clienteId) return { erro: 'Crédito exige cliente cadastrado na conta.' };
+  if (p.data.cpf && !cpfValido(p.data.cpf)) return { erro: 'CPF inválido: confira os números.' };
+  const v = await sessaoDoOperador(p.data.sessaoId, s.id, s.papel);
+  if (v.erro || !v.sess) return { erro: v.erro };
+  const e = await contaDoLocal(p.data.contaId, v.sess.local_id);
+  if (e) return { erro: e };
+  const sb = supabaseAdmin();
+  const { data, error } = await sb.rpc('conta_pagar_parte', {
+    p_comanda: p.data.contaId, p_caixa_sessao: p.data.sessaoId, p_forma: p.data.forma,
+    p_itens: p.data.itens.map((i) => i.itemId), p_qtds: p.data.itens.map((i) => Math.round(i.qtd * 1000) / 1000),
+    p_maior18: p.data.maior18, p_cliente: p.data.clienteId, p_cpf: p.data.cpf,
+  });
+  if (error) return { erro: traduzErro(error.message) };
+  const vendaId = data as string;
+  const { data: vd } = await sb.from('vendas').select('criado_em, total').eq('id', vendaId).maybeSingle();
+  return { vendaId, quando: vd?.criado_em as string | undefined, total: vd ? Number(vd.total) : undefined };
+}
+
 function traduzErro(msg: string): string {
   if (msg.includes('cliente não encontrado')) return 'Cliente não encontrado ou desativado. Identifique de novo.';
   if (msg.includes('crédito exige cliente')) return 'Crédito exige cliente: identifique o cliente (F4).';
@@ -324,6 +450,8 @@ function traduzErro(msg: string): string {
   if (msg.includes('saldo insuficiente')) return 'Estoque insuficiente para um dos itens.';
   if (msg.includes('caixa fechado')) return 'Abra o caixa para vender.';
   if (msg.includes('vazia')) return 'A comanda está vazia.';
+  if (msg.includes('já existe uma conta aberta')) return msg.replace(/^.*já existe/, 'Já existe') + '.';
+  if (msg.includes('quantidade maior que a que está na conta')) return 'Quantidade maior que a que ainda está na conta.';
   return msg;
 }
 

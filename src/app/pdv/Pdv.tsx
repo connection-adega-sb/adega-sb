@@ -6,12 +6,14 @@ import Link from 'next/link';
 import {
   buscarProdutos, sessaoAtual, ultimoTurno,
   abrirCaixa, lancarMovimento, fecharCaixa, finalizarVendaPdv,
+  listarContas, abrirConta, adicionarNaConta, ajustarItemConta, type Conta,
   type ProdutoBusca, type CaixaInfo, type ResumoCaixa, type EstadoCaixa, type ResultadoFechamento,
 } from './actions';
 import { CadastroRapidoProduto } from '@/components/CadastroRapidoProduto';
 import { ClienteSeletor } from '@/components/ClienteSeletor';
 import { CpfNotaModal } from '@/components/CpfNotaModal';
 import { ReciboVenda, type ReciboDados } from '@/components/ReciboVenda';
+import { FecharContaModal, type PagamentoConta } from '@/components/FecharContaModal';
 import { creditoCliente, type Cliente, type CreditoCliente } from '@/app/clientes/actions';
 import { fone as fmtFone } from '@/lib/formatar';
 import { PrecificacaoModal } from '@/components/PrecificacaoModal';
@@ -54,6 +56,14 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
     return () => { vivo = false; };
   }, [cliente, forma]);
   const [aviso, setAviso] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
+
+  // "Conta de cliente" (0011): consumo no local com o nome do cliente, como mesa de bar
+  const [contas, setContas] = useState<Conta[]>([]);
+  const [contaId, setContaId] = useState<string | null>(null);
+  const [novaConta, setNovaConta] = useState<{ nome: string; maior18: boolean; cliente: Cliente | null } | null>(null);
+  const [seletorConta, setSeletorConta] = useState(false);
+  const [contaMaior18, setContaMaior18] = useState<Record<string, boolean>>({});
+  const [fecharContaAberto, setFecharContaAberto] = useState(false);
 
   // busca
   const [termo, setTermo] = useState('');
@@ -107,6 +117,17 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
 
   const localAtual = caixas.find((c) => c.id === caixaId)?.local_id;
 
+  // contas abertas do local (quadro abaixo da área do PDV)
+  const recarregarContas = useCallback(async () => {
+    if (!localAtual || !aberto) { setContas([]); return [] as Conta[]; }
+    const r = await listarContas(localAtual);
+    setContas(r);
+    setContaId((id) => (id && r.some((c) => c.id === id) ? id : null));
+    return r;
+  }, [localAtual, aberto]);
+  useEffect(() => { void recarregarContas(); }, [recarregarContas]);
+  const conta = contas.find((c) => c.id === contaId) ?? null;
+
   // ------------------------------------------------ busca com debounce (PDV-02)
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
@@ -122,6 +143,16 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
   // ------------------------------------------------ adicionar item (PDV-04/06/07)
   const adicionar = useCallback((p: ProdutoBusca, qtdExtra = 1) => {
     if (!aberto) return;
+    if (contaId && sessao) {   // conta de cliente ativa: o item vai direto para a conta (gravado no banco)
+      setTermo(''); setResultados([]); buscaRef.current?.focus();
+      void adicionarNaConta({ sessaoId: sessao.sessaoId, contaId, produtoId: p.id, qtd: qtdExtra, maior18: !!contaMaior18[contaId] })
+        .then(async (r) => {
+          if (r.erro) setAviso({ tipo: 'erro', texto: r.erro.includes('+18') ? 'Item +18: marque "maiores de 18 anos" na conta.' : r.erro });
+          else setAviso(null);
+          await recarregarContas();
+        });
+      return;
+    }
     if (p.estoque <= 0 && !p.fumigeno) { /* segue: estoque negativo é recusado no servidor */ }
     setLinhas((prev) => {
       const i = prev.findIndex((l) => l.produto.id === p.id);
@@ -136,7 +167,7 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
     });
     setTermo(''); setResultados([]);
     buscaRef.current?.focus();
-  }, [aberto]);
+  }, [aberto, contaId, sessao, contaMaior18, recarregarContas]);
 
   // cadastro feito no MEIO da venda → o produto entra na comanda na hora e a operação segue
   const aoCadastrar = useCallback((p: ProdutoNovo) => {
@@ -172,7 +203,9 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
       // modal de cadastro aberto: ele segura o teclado (Esc fecha, nada mais dispara)
       if (cadastro) { if (e.key === 'Escape') { e.preventDefault(); setCadastro(null); } return; }
       // seletor de cliente aberto: ele segura o teclado (Esc fecha nele mesmo)
-      if (seletorCliente) return;
+      if (seletorCliente || seletorConta) return;
+      // conta de cliente: abrir (nome) e fechar (dividir) seguram o teclado
+      if (novaConta || fecharContaAberto) return;
       // "CPF na nota?" e comprovante seguram o teclado (Enter/Esc tratados neles)
       if (cpfModal || recibo) return;
       // módulos do topo abertos: cada um fecha sozinho no Esc (senão o Esc limparia a busca)
@@ -181,7 +214,8 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
       else if (e.key === 'F8') { e.preventDefault(); setPainelAberto(true); }
       else if (e.key === 'F9') { e.preventDefault(); setVendasAberta(true); }
       else if (e.key === 'F4') { e.preventDefault(); if (aberto) setSeletorCliente(true); }
-      else if (e.key === 'F12') { e.preventDefault(); finalizar(); }
+      else if (e.key === 'F6') { e.preventDefault(); if (aberto && !outroOperador) setNovaConta({ nome: '', maior18: false, cliente: null }); }
+      else if (e.key === 'F12') { e.preventDefault(); if (conta) { if (conta.itens.length) setFecharContaAberto(true); } else finalizar(); }
       else if (e.key === 'Escape') {
         if (painelAberto) setPainelAberto(false);
         else if (drawer) setDrawer(false);
@@ -255,6 +289,36 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
     const rotuloForma = { pix: 'PIX', cartao: 'CARTÃO', dinheiro: 'DINHEIRO', credito: 'CRÉDITO' }[forma];
     setAviso({ tipo: 'ok', texto: `Venda finalizada: ${brl(total)} no ${rotuloForma}${quem}` });
     setRecibo(dados);
+    await recarregar(caixaId);
+  }
+
+  // ------------------------------------------------ conta de cliente (0011)
+  async function criarConta() {
+    if (!novaConta || !sessao || salvando) return;
+    setSalvando(true);
+    const r = await abrirConta({ sessaoId: sessao.sessaoId, nome: novaConta.nome, clienteId: novaConta.cliente?.id ?? null });
+    setSalvando(false);
+    if (r.erro || !r.contaId) { setAviso({ tipo: 'erro', texto: r.erro ?? 'Não foi possível abrir a conta.' }); return; }
+    setContaMaior18((m) => ({ ...m, [r.contaId as string]: novaConta.maior18 }));
+    setNovaConta(null);
+    await recarregarContas();
+    setContaId(r.contaId);
+    setAviso({ tipo: 'ok', texto: `Conta "${novaConta.nome.trim()}" aberta: passe os produtos.` });
+    buscaRef.current?.focus();
+  }
+
+  async function aoPagarConta(p: PagamentoConta) {
+    if (!conta || !sessao) return;
+    setRecibo({
+      vendaId: p.vendaId, quando: p.quando, operador: sessao.operador || nome, caixa: nomeCaixa,
+      itens: p.itens, subtotal: p.total, desconto: 0, total: p.total, forma: p.forma, recebido: null,
+      cliente: conta.nome, cpf: p.cpf, maior18: !!contaMaior18[conta.id],
+    });
+    const lista = await recarregarContas();
+    if (!lista.some((c) => c.id === conta.id)) {
+      setFecharContaAberto(false); setContaId(null);
+      setAviso({ tipo: 'ok', texto: `Conta "${conta.nome}" fechada e paga.` });
+    }
     await recarregar(caixaId);
   }
 
@@ -385,12 +449,23 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
             >
               + Produto novo
             </button>
+
+            <button
+              type="button"
+              onClick={() => setNovaConta({ nome: '', maior18: false, cliente: null })}
+              disabled={!aberto || outroOperador}
+              data-testid="pdv-conta-btn"
+              title="Consumo no local com o nome do cliente (como mesa de bar)"
+              className="shrink-0 rounded-full bg-acao-600 px-4 py-3 text-xs font-bold text-white shadow-acao transition-colors hover:opacity-90 disabled:opacity-50"
+            >
+              Conta de cliente<span className="hidden xl:inline font-semibold opacity-80"> · F6</span>
+            </button>
           </div>
 
           {buscando && <p className="text-xs text-ink-soft" data-testid="pdv-buscando">Buscando…</p>}
 
           {/* painel de resultados: ocupa a altura que sobra, como no protótipo */}
-          <div className="mb-24 flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-white shadow-card lg:mb-0">
+          <div className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-white shadow-card ${aberto ? '' : 'mb-24 lg:mb-0'}`}>
             <div className={`shrink-0 grid-cols-[96px_1fr_84px_104px] items-center gap-3 border-b border-line bg-fundo/40 px-4 py-2.5 ${resultados.length ? 'hidden sm:grid' : 'hidden'}`}>
               <span className="label">Código</span>
               <span className="label">Produto</span>
@@ -493,6 +568,39 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
               </div>
             )}
           </div>
+
+          {/* contas de cliente abertas: sempre à vista, logo abaixo da área do PDV */}
+          {aberto && (
+            <section className="mb-24 shrink-0 rounded-card border-[1.5px] border-dashed border-acao-600 bg-white p-3 shadow-card lg:mb-0" data-testid="pdv-contas">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h2 className="text-sm font-extrabold text-estrutura">
+                  Contas abertas ({contas.length}) <span className="font-semibold text-ink-soft">· consumo no local</span>
+                </h2>
+                {contas.length > 0 && (
+                  <span className="text-xs text-ink-soft tabular-nums">em aberto {brl(contas.reduce((a, c) => a + c.total, 0))}</span>
+                )}
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {contas.map((c, i) => (
+                  <button key={c.id} type="button" data-testid={`pdv-conta-card-${i}`}
+                    onClick={() => { setContaId(c.id === contaId ? null : c.id); setAviso(null); buscaRef.current?.focus(); }}
+                    className={`min-w-[170px] max-w-[220px] shrink-0 rounded-card border px-3 py-2 text-left ${c.id === contaId ? 'border-2 border-acao-600 bg-acao-100' : 'border-line hover:border-estrutura'}`}>
+                    <span className="block truncate text-sm font-extrabold text-estrutura">{c.nome}</span>
+                    <span className="block truncate text-[11.5px] text-ink-soft">
+                      {c.itens.length ? c.itens.map((it) => `${it.qtd.toLocaleString('pt-BR')} ${it.nome}`).join(' · ') : 'sem itens'}
+                    </span>
+                    <span className="block font-extrabold tabular-nums text-acao-700">{brl(c.total)}</span>
+                    <span className="block text-[11px] text-ink-soft">aberta {new Date(c.abertaEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                  </button>
+                ))}
+                <button type="button" onClick={() => setNovaConta({ nome: '', maior18: false, cliente: null })} disabled={outroOperador}
+                  data-testid="pdv-conta-nova"
+                  className="min-w-[140px] shrink-0 rounded-card border border-dashed border-line-input px-3 py-2 text-sm font-extrabold text-acao-700 hover:border-acao-600 disabled:opacity-50">
+                  + Nova conta
+                </button>
+              </div>
+            </section>
+          )}
         </main>
 
         {/* ------------------------------------------------ comanda: instância única;
@@ -508,7 +616,75 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
                 : 'hidden'
           }
         >
-          <div className="flex min-h-0 flex-1 flex-col" data-testid="pdv-comanda">
+          {conta && sessao && (
+            <div className="flex min-h-0 flex-1 flex-col" data-testid="pdv-conta-ativa">
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-4 py-4">
+                <div className="min-w-0">
+                  <h2 className="flex items-center gap-2 truncate text-lg font-extrabold text-estrutura">
+                    <Icone n="usuario" className="h-5 w-5 shrink-0" /><span className="truncate" data-testid="pdv-conta-nome-ativa">Conta: {conta.nome}</span>
+                  </h2>
+                  <p className="text-xs text-ink-soft">Itens passados no leitor entram NESTA conta</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-acao-100 px-2 py-0.5 text-[11px] font-bold tabular-nums text-acao-700">
+                    {conta.itens.reduce((a, i) => a + i.qtd, 0).toLocaleString('pt-BR')} itens
+                  </span>
+                  {!ehDesktop && drawer && (
+                    <button onClick={() => setDrawer(false)} aria-label="Fechar" className="p-1 text-ink-soft hover:text-estrutura">
+                      <Icone n="fechar" className="h-6 w-6" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-4" data-testid="pdv-conta-itens">
+                {conta.itens.map((it) => (
+                  <div key={it.id} className="flex items-center gap-2 rounded-card border border-line bg-white px-3 py-3" data-testid={`pdv-conta-linha-${it.produtoId}`}>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-ink">{it.nome}</p>
+                      <p className="mt-0.5 text-xs tabular-nums text-ink-soft">{brl(it.preco)} × {it.qtd.toLocaleString('pt-BR')} = <strong className="text-estrutura">{brl(it.subtotal)}</strong></p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1 rounded-full border border-line p-0.5">
+                      <button aria-label="Diminuir" onClick={() => void ajustarItemConta({ sessaoId: sessao.sessaoId, contaId: conta.id, itemId: it.id, qtd: Math.max(0, Math.ceil(it.qtd) - 1) }).then(recarregarContas)}
+                        className="flex h-7 w-7 items-center justify-center rounded-full text-ink-soft hover:bg-fundo hover:text-estrutura"><Icone n="menos" className="h-3.5 w-3.5" /></button>
+                      <span className="w-7 text-center text-xs font-bold tabular-nums text-estrutura">{it.qtd.toLocaleString('pt-BR')}</span>
+                      <button aria-label="Aumentar" onClick={() => void ajustarItemConta({ sessaoId: sessao.sessaoId, contaId: conta.id, itemId: it.id, qtd: Math.floor(it.qtd) + 1 }).then(recarregarContas)}
+                        className="flex h-7 w-7 items-center justify-center rounded-full text-ink-soft hover:bg-fundo hover:text-estrutura"><Icone n="mais" className="h-3.5 w-3.5" /></button>
+                    </div>
+                  </div>
+                ))}
+                {!conta.itens.length && (
+                  <div className="flex h-full flex-col items-center justify-center p-8 text-center text-ink-soft">
+                    <Icone n="carrinho" className="mb-3 h-12 w-12 text-ink-faint" />
+                    <p className="text-sm font-semibold">Conta vazia</p>
+                    <p className="mt-1 text-xs">Passe o leitor ou busque o produto: ele entra nesta conta.</p>
+                  </div>
+                )}
+              </div>
+              {aviso && (
+                <p role="alert" data-testid="pdv-conta-aviso"
+                  className={`shrink-0 px-4 py-3 text-sm font-bold ${aviso.tipo === 'ok' ? 'bg-ok/10 text-ok' : 'bg-bad/10 text-bad'}`}>{aviso.texto}</p>
+              )}
+              <div className="shrink-0 space-y-3 border-t border-line bg-fundo/40 p-4">
+                <label className="flex items-center gap-2 rounded-card bg-acao-100 px-3 py-2 text-sm font-bold text-acao-700" data-testid="pdv-conta-maior18-ativa">
+                  <input type="checkbox" checked={!!contaMaior18[conta.id]} onChange={(e) => setContaMaior18((m) => ({ ...m, [conta.id]: e.target.checked }))} />
+                  Todos desta conta são maiores de 18 anos
+                </label>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-base font-extrabold text-estrutura">Total da conta</span>
+                  <span className="text-[26px] font-extrabold tabular-nums text-estrutura" data-testid="pdv-conta-total">{brl(conta.total)}</span>
+                </div>
+                <button type="button" onClick={() => { setContaId(null); setAviso(null); buscaRef.current?.focus(); }} data-testid="pdv-conta-guardar"
+                  className="w-full rounded-full border-[1.5px] border-line bg-white px-4 py-3 text-[14px] font-bold text-estrutura hover:border-estrutura">
+                  Guardar conta (continua aberta)
+                </button>
+                <button type="button" onClick={() => { if (conta.itens.length) setFecharContaAberto(true); }} disabled={!conta.itens.length || outroOperador} data-testid="pdv-conta-fechar"
+                  className="w-full rounded-full bg-acao-600 px-4 py-3.5 text-[15px] font-bold text-white shadow-acao disabled:opacity-50">
+                  Fechar conta (F12)
+                </button>
+              </div>
+            </div>
+          )}
+          <div className={`min-h-0 flex-1 flex-col ${conta ? 'hidden' : 'flex'}`} data-testid="pdv-comanda">
             <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-4 py-4">
               <div className="flex items-center gap-2">
                 <Icone n="carrinho" className="h-5 w-5 text-estrutura" />
@@ -700,6 +876,56 @@ export function Pdv({ caixas: caixasInicial, nome, papel, usuarioId, deveTrocarS
           resumo={`${linhas.reduce((a, l) => a + l.qtd, 0).toLocaleString('pt-BR')} ${linhas.length === 1 && linhas[0].qtd === 1 ? 'item' : 'itens'} · ${brl(total)} no ${{ pix: 'PIX', cartao: 'Cartão', dinheiro: 'Dinheiro', credito: 'Crédito' }[forma]}`}
           cpfInicial={cliente?.cpf ?? null} pendente={salvando}
           confirmar={confirmarVenda} voltar={() => { setCpfModal(false); buscaRef.current?.focus(); }} />
+      )}
+
+      {novaConta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-estrutura/60 p-4" role="dialog" aria-modal="true" aria-label="Abrir conta de cliente"
+          data-testid="pdv-conta-modal"
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setNovaConta(null); buscaRef.current?.focus(); } }}>
+          <form className="w-full max-w-md space-y-4 rounded-banner bg-white p-6"
+            onSubmit={(e) => { e.preventDefault(); void criarConta(); }}>
+            <div>
+              <h2 className="text-xl font-extrabold text-estrutura">Conta de cliente</h2>
+              <p className="text-sm text-ink-soft">Consumo no local, como mesa de bar. O nome aparece no quadro &quot;Contas abertas&quot;.</p>
+            </div>
+            <label className="block">
+              <span className="label">Nome da conta</span>
+              <input autoFocus value={novaConta.nome} maxLength={60} data-testid="pdv-conta-nome" placeholder="Ex.: Grupo do Carlos"
+                onChange={(e) => setNovaConta((n) => (n ? { ...n, nome: e.target.value } : n))}
+                className="mt-1 w-full rounded-full border-[1.5px] border-line-input px-4 py-2.5 focus:border-estrutura focus:outline-none" />
+            </label>
+            <label className="flex items-center gap-2 rounded-card bg-acao-100 px-3 py-2 text-sm font-bold text-acao-700">
+              <input type="checkbox" checked={novaConta.maior18} data-testid="pdv-conta-maior18"
+                onChange={(e) => setNovaConta((n) => (n ? { ...n, maior18: e.target.checked } : n))} />
+              Todos são maiores de 18 anos (documento conferido)
+            </label>
+            <div className="flex items-center justify-between gap-2 text-sm">
+              {novaConta.cliente
+                ? <span className="font-bold text-estrutura" data-testid="pdv-conta-cliente">Cliente: {novaConta.cliente.nome}</span>
+                : <span className="text-ink-soft">Cliente cadastrado: opcional (exigido para pagar no Crédito)</span>}
+              <button type="button" onClick={() => setSeletorConta(true)} data-testid="pdv-conta-vincular"
+                className="shrink-0 rounded-full border border-line px-3 py-1.5 text-xs font-bold text-estrutura hover:border-estrutura">
+                {novaConta.cliente ? 'Trocar' : 'Vincular cliente'}
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => { setNovaConta(null); buscaRef.current?.focus(); }}
+                className="rounded-full border border-line px-4 py-3 font-bold text-ink-soft">Cancelar</button>
+              <button type="submit" disabled={!novaConta.nome.trim() || salvando} data-testid="pdv-conta-abrir"
+                className="rounded-full bg-acao-600 px-4 py-3 font-extrabold text-white disabled:opacity-50">{salvando ? 'Abrindo…' : 'Abrir conta'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {seletorConta && (
+        <ClienteSeletor fechar={() => setSeletorConta(false)}
+          onEscolher={(c) => setNovaConta((n) => (n ? { ...n, cliente: c, nome: n.nome.trim() ? n.nome : c.nome } : n))} />
+      )}
+
+      {fecharContaAberto && conta && sessao && (
+        <FecharContaModal conta={conta} sessaoId={sessao.sessaoId} maior18={!!contaMaior18[conta.id]} pausado={!!recibo}
+          fechar={() => { setFecharContaAberto(false); buscaRef.current?.focus(); }} aoPagar={aoPagarConta} />
       )}
 
       {recibo && <ReciboVenda r={recibo} fechar={() => { setRecibo(null); buscaRef.current?.focus(); }} />}

@@ -76,6 +76,9 @@ async function garantirUsuario() {
   await adm.from('profile_locais').delete().eq('profile_id', uid);
   const { error: eVinc } = await adm.from('profile_locais').insert({ profile_id: uid, local_id: loja.id, tenant_id: t.id });
   if (eVinc) throw eVinc;
+  // 0011: conta de cliente que sobrou de uma execução que falhou no meio barra o fechamento do caixa → fecha
+  await adm.from('comandas').update({ status: 'fechada', fechada_em: new Date().toISOString() })
+    .eq('origem', 'pdv').eq('status', 'aberta').like('nome', 'Conta E2E %');
   return { lojaId: loja.id };
 }
 
@@ -613,6 +616,85 @@ let browser = null, srv = null;
       const n = await pp.getByTestId('produtos-editar').count();
       await pp.close();
       return n === 0;
+    });
+    // ------------------------------------------------ 13) CONTA DE CLIENTE (0011): consumo no local com nome + dividir por itens
+    const nomeConta = 'Conta E2E ' + String(Date.now()).slice(-6);
+    const totalConta = (pg) => pg.getByTestId('pdv-conta-total').innerText().then(limpa);
+    const esperaTotalConta = (pg, txt) => pg.waitForFunction((t) => {
+      const el = document.querySelector('[data-testid="pdv-conta-total"]');
+      return !!el && el.textContent.replace(/[\u00A0\u202F]/g, ' ').includes(t);
+    }, txt, { timeout: 15000 });
+    await check('P43', 'Conta de cliente: botão → nome + 18 → conta ativa e no quadro "Contas abertas"', async () => {
+      await p9.getByTestId('pdv-conta-btn').click();
+      await p9.getByTestId('pdv-conta-modal').waitFor({ timeout: 5000 });
+      await p9.getByTestId('pdv-conta-nome').fill(nomeConta);
+      await p9.getByTestId('pdv-conta-maior18').check();
+      await p9.getByTestId('pdv-conta-abrir').click();
+      await p9.getByTestId('pdv-conta-ativa').waitFor({ timeout: 15000 });
+      const card = p9.getByTestId('pdv-contas').getByText(nomeConta);
+      await card.first().waitFor({ timeout: 10000 });
+      return (await p9.getByTestId('pdv-conta-nome-ativa').innerText()).includes(nomeConta);
+    });
+    await check('P44', 'leitor na conta: 3 cervejas + 2 do produto novo → R$ 29,27 gravado no banco', async () => {
+      await digitar(p9, '3*7898107'); await p9.getByTestId('pdv-busca').press('Enter');
+      await esperaTotalConta(p9, 'R$ 13,47');
+      await digitar(p9, '2*' + codigoNovo); await p9.getByTestId('pdv-busca').press('Enter');
+      await esperaTotalConta(p9, 'R$ 29,27');
+      const { data: c } = await adm.from('comandas').select('total, origem, status').eq('nome', nomeConta).single();
+      return Number(c.total) === 29.27 && c.origem === 'pdv' && c.status === 'aberta' && (await totalConta(p9)).includes('R$ 29,27');
+    });
+    await check('P45', 'Guardar conta: volta para a venda de balcão e a conta continua no quadro', async () => {
+      await p9.getByTestId('pdv-conta-guardar').click();
+      await p9.getByTestId('pdv-conta-ativa').waitFor({ state: 'detached', timeout: 5000 });
+      await p9.getByTestId('pdv-finalizar').waitFor({ timeout: 5000 });
+      return (await p9.getByTestId('pdv-contas').innerText()).includes(nomeConta);
+    });
+    await check('P46', 'fechar o caixa com conta aberta é barrado', async () => {
+      await p9.keyboard.press('F8');
+      await p9.getByTestId('pdv-painel').waitFor({ timeout: 5000 });
+      await p9.getByTestId('pdv-aba-fechar').click();
+      const txt = await p9.getByText(/Esperado na gaveta/).innerText();
+      await p9.getByTestId('pdv-valor-contado').fill(String(paraReal(txt)));
+      await p9.getByTestId('pdv-fechar-submit').click();
+      // o <p role="alert"> existe sempre (vazio): espera o TEXTO do bloqueio, não só o elemento
+      const alerta = p9.locator('[data-testid="pdv-form-fechar"] [role="alert"]').filter({ hasText: /de cliente aberta/ });
+      await alerta.waitFor({ timeout: 15000 });
+      const msg = await alerta.innerText();
+      await fecharPainel(p9);
+      return /conta de cliente aberta/.test(msg) && (await status(p9)) === 'ABERTO';
+    });
+    await check('P47', 'dividir por itens: pessoa 1 paga 2 cervejas + 1 produto (PIX), pessoa 2 o resto (dinheiro); conta fecha', async () => {
+      await p9.getByTestId('pdv-contas').getByText(nomeConta).first().click();
+      await p9.getByTestId('pdv-conta-ativa').waitFor({ timeout: 5000 });
+      await p9.getByTestId('pdv-conta-fechar').click();
+      await p9.getByTestId('conta-fechar-modal').waitFor({ timeout: 5000 });
+      await p9.getByTestId('conta-aba-itens').click();
+      // ordem alfabética: 0 = Cerveja Pilsen (3), 1 = Produto Cadastro Rapido (2)
+      await p9.getByTestId('conta-q-0-0-mais').click();
+      await p9.getByTestId('conta-q-0-0-mais').click();
+      await p9.getByTestId('conta-q-0-1-mais').click();
+      await p9.getByTestId('conta-resto-1').click();
+      const falta = limpa(await p9.getByTestId('conta-falta-total').innerText());
+      const v0 = limpa(await p9.getByTestId('conta-valor-0').innerText());
+      const v1 = limpa(await p9.getByTestId('conta-valor-1').innerText());
+      if (falta !== 'R$ 0,00' || v0 !== 'R$ 16,88' || v1 !== 'R$ 12,39') throw new Error(`divisão: falta ${falta} · ${v0} · ${v1}`);
+      await p9.getByTestId('conta-receber-0').click();
+      await p9.getByTestId('pdv-recibo').waitFor({ timeout: 25000 });
+      const papel1 = limpa(await p9.getByTestId('pdv-recibo-papel').innerText());
+      await p9.keyboard.press('Enter');
+      await p9.getByTestId('pdv-recibo').waitFor({ state: 'detached', timeout: 5000 });
+      await p9.getByTestId('conta-forma-0').selectOption('dinheiro');
+      await p9.getByTestId('conta-receber-0').click();
+      await p9.getByTestId('pdv-recibo').waitFor({ timeout: 25000 });
+      await p9.keyboard.press('Enter');
+      await p9.getByTestId('pdv-recibo').waitFor({ state: 'detached', timeout: 5000 });
+      await p9.getByTestId('conta-fechar-modal').waitFor({ state: 'detached', timeout: 15000 });
+      const { data: c } = await adm.from('comandas').select('status').eq('nome', nomeConta).single();
+      const { data: vs } = await adm.from('vendas').select('total, forma_pagamento').order('criado_em', { ascending: false }).limit(2);
+      const ok2 = vs?.some((v) => Number(v.total) === 16.88 && v.forma_pagamento === 'pix')
+        && vs?.some((v) => Number(v.total) === 12.39 && v.forma_pagamento === 'dinheiro');
+      if (!papel1.includes(nomeConta)) throw new Error('comprovante da pessoa 1 sem o nome da conta');
+      return c.status === 'fechada' && ok2 && !(await p9.getByTestId('pdv-contas').innerText()).includes(nomeConta);
     });
     {
       const { error: eP } = await adm.from('produtos').update({ ativo: false }).eq('codigo_barras', codigoTela);

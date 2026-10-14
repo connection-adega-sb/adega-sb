@@ -144,6 +144,11 @@ function traduzErro(msg: string): string {
   const m = msg.toLowerCase();
   if (m.includes('código de barras já cadastrado')) return 'Este código de barras já está cadastrado.';
   if (m.includes('nome do produto é obrigatório')) return 'Informe o nome do produto.';
+  if (m.includes('ncm deve ter 8')) return 'NCM deve ter 8 dígitos.';
+  if (m.includes('cest deve ter 7')) return 'CEST deve ter 7 dígitos (ou deixe vazio).';
+  if (m.includes('código de barras deve ter')) return 'Código de barras deve ter 8, 12, 13 ou 14 dígitos.';
+  if (m.includes('valor numérico inválido em')) return 'Número inválido no campo ' + msg.split(' em ').pop() + '.';
+  if (m.includes('violates check constraint')) return 'Algum campo está fora do padrão (confira unidade, CSOSN, CST e datas).';
   if (m.includes('preço de venda inválido')) return 'Preço de venda inválido.';
   if (m.includes('tipo de produto inválido')) return 'Tipo de produto inválido.';
   if (m.includes('unidade de venda inválida')) return 'Unidade de venda inválida.';
@@ -171,10 +176,10 @@ function traduzErro(msg: string): string {
 export type ProdutoLinha = {
   id: string; nome: string; codigo_barras: string | null; categoria_id: string | null; categoria: string | null;
   preco_varejo: number; custo_medio: number | null; adulto: boolean; fumigeno: boolean;
-  tipo: string; unidade: string; ativo: boolean; criado_em: string; saldo: number;
+  tipo: string; unidade: string; ativo: boolean; criado_em: string; saldo: number; revisar: string | null;
 };
-export type FiltroProdutos = 'ativos' | 'todos' | 'sem_estoque';
-export type KpisProdutos = { ativos: number; semCodigo: number; adultos: number; semEstoque: number; novosMes: number };
+export type FiltroProdutos = 'ativos' | 'todos' | 'sem_estoque' | 'revisar';
+export type KpisProdutos = { ativos: number; semCodigo: number; adultos: number; semEstoque: number; novosMes: number; revisar: number };
 
 const limparTermo = (t: string) => t.replace(/[,()*%\\"]/g, ' ').trim();
 
@@ -183,9 +188,10 @@ export async function listarProdutosCatalogo(termo: string, filtro: FiltroProdut
   const sb = supabaseAdmin();
   const t = limparTermo(termo);
   let q = sb.from('produtos')
-    .select('id, nome, codigo_barras, categoria_id, preco_varejo, custo_medio, adulto, fumigeno, tipo, unidade, ativo, criado_em, categorias(nome)')
+    .select('id, nome, codigo_barras, categoria_id, preco_varejo, custo_medio, adulto, fumigeno, tipo, unidade, ativo, criado_em, revisar, categorias(nome)')
     .eq('tenant_id', s.tenantId);
   if (filtro !== 'todos') q = q.eq('ativo', true);
+  if (filtro === 'revisar') q = q.not('revisar', 'is', null);
   if (t.length >= 2) q = q.or(`nome.ilike.%${t}%,codigo_barras.ilike.%${t}%`);
   const { data } = await q.order('nome').limit(500);
   const prods = data ?? [];
@@ -201,22 +207,38 @@ export async function listarProdutosCatalogo(termo: string, filtro: FiltroProdut
     categoria: (p.categorias as unknown as { nome: string } | null)?.nome ?? null,
     preco_varejo: Number(p.preco_varejo), custo_medio: p.custo_medio === null ? null : Number(p.custo_medio),
     adulto: !!p.adulto, fumigeno: !!p.fumigeno, tipo: p.tipo as string, unidade: p.unidade as string,
-    ativo: !!p.ativo, criado_em: p.criado_em as string, saldo: Math.round((saldo.get(p.id as string) ?? 0) * 1000) / 1000,
+    ativo: !!p.ativo, criado_em: p.criado_em as string, revisar: (p.revisar as string | null) ?? null, saldo: Math.round((saldo.get(p.id as string) ?? 0) * 1000) / 1000,
   }));
   return filtro === 'sem_estoque' ? linhas.filter((l) => l.tipo === 'revenda' && l.saldo <= 0) : linhas;
 }
 
 export async function kpisProdutos(): Promise<KpisProdutos> {
-  const lista = await listarProdutosCatalogo('', 'ativos');
+  const s = await exigirSessao(PAPEIS_CADASTRO);
+  const sb = supabaseAdmin();
   const d = new Date();
   const mes = new Date(d.getFullYear(), d.getMonth(), 1).toISOString();
-  return {
-    ativos: lista.length,
-    semCodigo: lista.filter((p) => !p.codigo_barras).length,
-    adultos: lista.filter((p) => p.adulto).length,
-    semEstoque: lista.filter((p) => p.tipo === 'revenda' && p.saldo <= 0).length,
-    novosMes: lista.filter((p) => p.criado_em >= mes).length,
-  };
+  // contagem no BANCO (head + count): a lista da tela mostra no máximo 500 linhas, os números não
+  const conta = async (f: (q: ReturnType<typeof base>) => ReturnType<typeof base>) => (await f(base())).count ?? 0;
+  const base = () => sb.from('produtos').select('id', { count: 'exact', head: true }).eq('tenant_id', s.tenantId).eq('ativo', true);
+  const [ativos, semCodigo, adultos, novosMes, revisar] = await Promise.all([
+    conta((q) => q), conta((q) => q.is('codigo_barras', null)), conta((q) => q.eq('adulto', true)),
+    conta((q) => q.gte('criado_em', mes)), conta((q) => q.not('revisar', 'is', null)),
+  ]);
+  // sem estoque: revenda ativa sem saldo positivo em nenhum local
+  const comSaldo = new Set<string>();
+  for (let de = 0; ; de += 1000) {
+    const { data } = await sb.from('estoque_saldos').select('produto_id').gt('quantidade', 0).range(de, de + 999);
+    for (const r of data ?? []) comSaldo.add(r.produto_id as string);
+    if (!data || data.length < 1000) break;
+  }
+  let revenda = 0, revendaComSaldo = 0;
+  for (let de = 0; ; de += 1000) {
+    const { data } = await sb.from('produtos').select('id').eq('tenant_id', s.tenantId).eq('ativo', true)
+      .eq('tipo', 'revenda').order('id').range(de, de + 999);
+    for (const r of data ?? []) { revenda++; if (comSaldo.has(r.id as string)) revendaComSaldo++; }
+    if (!data || data.length < 1000) break;
+  }
+  return { ativos, semCodigo, adultos, novosMes, revisar, semEstoque: revenda - revendaComSaldo };
 }
 
 // locais em que o usuário pode dar saldo inicial (master: todos; demais: os vinculados)
@@ -250,4 +272,79 @@ export async function atualizarProduto(_: EstadoEdicao, form: FormData): Promise
     p_ativo: form.get('ativo') === 'on',
   });
   return error ? { erro: traduzErro(error.message) } : { ok: true };
+}
+
+// ================================================================ FICHA COMPLETA do produto (layout novo · 0010 produto_salvar_ficha)
+// Tela "Cadastro de produto" (adega-sb-docs\novo layout\cadastro produtos001-003): dados gerais, financeiro,
+// emissão fiscal (NF-e/NFC-e), reforma tributária, observações e "outros". Estoque NÃO se edita aqui.
+export type FichaProduto = {
+  id: string; nome: string; codigo: string; sku: string; codigo_barras: string;
+  categoria: string; fornecedor: string; fabricante: string; unidade_comercial: string;
+  preco_custo: string; preco_varejo: string; custo_medio: number | null; estoque_minimo: string; saldo: number; unidade: string;
+  ultimo_reajuste: string; oculto_tabela: boolean; ativo: boolean; adulto: boolean; fumigeno: boolean;
+  ncm: string; csosn: string; cest: string; origem: string; icms_aliquota: string; icms_base: string;
+  ipi_aliquota: string; cst_pis: string; cst_cofins: string; peso_bruto: string; peso_liquido: string;
+  cst_ibs_cbs: string; cclass_trib: string; observacao: string; gtin_tributavel: string; previsao_chegada: string;
+  codigo_anp: string; fabricacao_propria: boolean; revisar: string | null; atualizado_em: string | null;
+};
+
+const br = (v: unknown, casas = 2) => (v === null || v === undefined || v === '' ? ''
+  : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: Math.max(casas, 4), useGrouping: false }));
+const tx = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+
+export async function carregarFicha(id: string): Promise<FichaProduto | null> {
+  const s = await exigirSessao(['master', 'gerente', 'estoquista']);
+  if (!UUID.safeParse(id).success) return null;
+  const sb = supabaseAdmin();
+  const { data: p } = await sb.from('produtos').select('*, categorias(nome)').eq('id', id).eq('tenant_id', s.tenantId).maybeSingle();
+  if (!p) return null;
+  const { data: sal } = await sb.from('estoque_saldos').select('quantidade').eq('produto_id', id);
+  const saldo = (sal ?? []).reduce((a, r) => a + Number(r.quantidade), 0);
+  return {
+    id: p.id, nome: tx(p.nome), codigo: tx(p.codigo), sku: tx(p.sku), codigo_barras: tx(p.codigo_barras),
+    categoria: (p.categorias as { nome: string } | null)?.nome ?? '', fornecedor: tx(p.fornecedor), fabricante: tx(p.fabricante),
+    unidade_comercial: tx(p.unidade_comercial) || 'UN',
+    preco_custo: br(p.preco_custo), preco_varejo: br(p.preco_varejo),
+    custo_medio: p.custo_medio === null ? null : Number(p.custo_medio),
+    estoque_minimo: br(p.estoque_minimo, 0), saldo: Math.round(saldo * 1000) / 1000, unidade: tx(p.unidade),
+    ultimo_reajuste: tx(p.ultimo_reajuste), oculto_tabela: !!p.oculto_tabela, ativo: !!p.ativo,
+    adulto: !!p.adulto, fumigeno: !!p.fumigeno,
+    ncm: tx(p.ncm), csosn: tx(p.csosn), cest: tx(p.cest), origem: tx(p.origem ?? 0),
+    icms_aliquota: br(p.icms_aliquota), icms_base: br(p.icms_base), ipi_aliquota: br(p.ipi_aliquota),
+    cst_pis: tx(p.cst_pis), cst_cofins: tx(p.cst_cofins), peso_bruto: br(p.peso_bruto, 3), peso_liquido: br(p.peso_liquido, 3),
+    cst_ibs_cbs: tx(p.cst_ibs_cbs), cclass_trib: tx(p.cclass_trib), observacao: tx(p.observacao),
+    gtin_tributavel: tx(p.gtin_tributavel), previsao_chegada: tx(p.previsao_chegada), codigo_anp: tx(p.codigo_anp),
+    fabricacao_propria: !!p.fabricacao_propria, revisar: (p.revisar as string | null) ?? null,
+    atualizado_em: (p.atualizado_em as string | null) ?? null,
+  };
+}
+
+// "Setor busca ou cadastra na hora": nome livre; se não existir, cria a categoria.
+export async function salvarFicha(id: string, dados: Omit<FichaProduto, 'id' | 'custo_medio' | 'saldo' | 'unidade' | 'revisar' | 'atualizado_em'>):
+  Promise<{ erro?: string; ok?: boolean }> {
+  const s = await exigirSessao(['master', 'gerente', 'estoquista']);
+  if (!UUID.safeParse(id).success) return { erro: 'Produto não encontrado.' };
+  const sb = supabaseAdmin();
+  let categoriaId: string | null = null;
+  const setor = dados.categoria.replace(/\s+/g, ' ').trim();
+  if (setor) {
+    const { data: cats } = await sb.from('categorias').select('id, nome').eq('tenant_id', s.tenantId);
+    const achou = (cats ?? []).find((c) => String(c.nome).toLowerCase() === setor.toLowerCase());
+    if (achou) categoriaId = achou.id as string;
+    else {
+      const { data: nova, error } = await sb.from('categorias').insert({ tenant_id: s.tenantId, nome: setor.slice(0, 60) }).select('id').single();
+      if (error) return { erro: 'Não foi possível criar o setor ' + setor + '.' };
+      categoriaId = nova.id as string;
+    }
+  }
+  const { categoria: _c, ...resto } = dados;
+  void _c;
+  const { error } = await sb.rpc('produto_salvar_ficha', { p_usuario: s.id, p_id: id, p_dados: { ...resto, categoria_id: categoriaId } });
+  return error ? { erro: traduzErro(error.message) } : { ok: true };
+}
+
+export async function listarSetores(): Promise<string[]> {
+  const s = await exigirSessao(PAPEIS_CADASTRO);
+  const { data } = await supabaseAdmin().from('categorias').select('nome').eq('tenant_id', s.tenantId).eq('ativo', true).order('nome');
+  return (data ?? []).map((c) => c.nome as string);
 }

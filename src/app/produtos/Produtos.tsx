@@ -1,10 +1,8 @@
 'use client';
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import {
-  atualizarProduto, kpisProdutos, listarCategorias, listarProdutosCatalogo,
-  type Categoria, type FiltroProdutos, type KpisProdutos, type ProdutoLinha,
-} from './actions';
+import { useEffect, useState } from 'react';
+import { kpisProdutos, listarProdutosCatalogo, type FiltroProdutos, type KpisProdutos, type ProdutoLinha } from './actions';
 import { CadastroRapidoProduto } from '@/components/CadastroRapidoProduto';
+import { FichaProduto } from '@/components/FichaProduto';
 import { Icone } from '@/components/Icone';
 import { brl } from '@/lib/formatar';
 import type { Papel } from '@/lib/papeis';
@@ -12,8 +10,6 @@ import type { Papel } from '@/lib/papeis';
 // Tela de produtos no padrão ERP (public/prototipos/vendas.html): título + 5 KPIs + busca/chips + tabela.
 // "Novo produto" usa o MESMO cadastro do PDV (0007 produto_criar), com textos de cadastro independente.
 type Aviso = { tipo: 'ok' | 'erro'; texto: string } | null;
-const CAMPO = 'mt-1 w-full rounded-full border border-line bg-white px-4 py-2.5 shadow-card focus:border-estrutura focus:outline-none';
-const LBL = 'block text-[11px] font-extrabold uppercase tracking-[.1em] text-ink-soft';
 
 export function Produtos({ papel, locais, deveTrocarSenha }: {
   papel: Papel; locais: { id: string; nome: string }[]; deveTrocarSenha: boolean;
@@ -104,7 +100,7 @@ export function Produtos({ papel, locais, deveTrocarSenha }: {
               data-testid="produtos-busca" autoComplete="off"
               className="w-full rounded-full border border-line bg-white py-2.5 pl-11 pr-4 shadow-card focus:border-estrutura focus:outline-none" />
           </div>
-          {([['ativos', 'Ativos'], ['sem_estoque', 'Sem estoque'], ['todos', 'Todos (inclui inativos)']] as [FiltroProdutos, string][]).map(([f, r]) => (
+          {([['ativos', 'Ativos'], ['sem_estoque', 'Sem estoque'], ['revisar', `Para revisar${kpis?.revisar ? ` (${kpis.revisar})` : ''}`], ['todos', 'Todos (inclui inativos)']] as [FiltroProdutos, string][]).map(([f, r]) => (
             <button key={f} type="button" onClick={() => setFiltro(f)} data-testid={`produtos-chip-${f}`}
               className={`whitespace-nowrap rounded-full border px-4 py-2 text-[13.5px] ${filtro === f
                 ? 'border-estrutura bg-estrutura font-bold text-white'
@@ -137,6 +133,7 @@ export function Produtos({ papel, locais, deveTrocarSenha }: {
                     <span className="font-bold text-estrutura">{p.nome}</span>
                     {p.adulto && <span className="ml-2 rounded-full bg-acao-100 px-2 py-0.5 text-[11px] font-bold text-acao-700">+18</span>}
                     {!p.ativo && <span className="ml-2 rounded-full bg-bad/10 px-2 py-0.5 text-[11px] font-bold text-bad">inativo</span>}
+                    {p.revisar && <span title={p.revisar} className="ml-2 rounded-full bg-warn/15 px-2 py-0.5 text-[11px] font-bold text-estrutura">revisar</span>}
                   </td>
                   <td className="hidden px-4 py-3 tabular-nums md:table-cell">{p.codigo_barras ?? <span className="text-ink-soft">—</span>}</td>
                   <td className="hidden px-4 py-3 lg:table-cell">{p.categoria ?? <span className="text-ink-soft">Sem categoria</span>}</td>
@@ -154,6 +151,11 @@ export function Produtos({ papel, locais, deveTrocarSenha }: {
               ))}
             </tbody>
           </table>
+          {lista?.length === 500 && (
+            <p className="border-t border-line px-4 py-3 text-center text-[13px] text-ink-soft" data-testid="produtos-limite">
+              Mostrando os 500 primeiros em ordem alfabética: use a busca para achar os outros.
+            </p>
+          )}
         </div>
       </div>
 
@@ -166,87 +168,9 @@ export function Produtos({ papel, locais, deveTrocarSenha }: {
       )}
 
       {editando && (
-        <Modal titulo="Editar produto" fechar={() => setEditando(null)}>
-          <EditarProduto p={editando} fechar={() => setEditando(null)}
-            salvo={(nome) => { setEditando(null); setAviso({ tipo: 'ok', texto: `${nome} atualizado.` }); setVersao((v) => v + 1); }} />
-        </Modal>
+        <FichaProduto id={editando.id} total={kpis?.ativos} fechar={() => setEditando(null)}
+          salvo={(nome) => { setEditando(null); setAviso({ tipo: 'ok', texto: `${nome} atualizado.` }); setVersao((v) => v + 1); }} />
       )}
     </div>
-  );
-}
-
-function Modal({ titulo, fechar, children }: { titulo: string; fechar: () => void; children: ReactNode }) {
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') fechar(); };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [fechar]);
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" data-testid="produtos-modal">
-      <div className="absolute inset-0 bg-estrutura/60" onClick={fechar} />
-      <div className="relative max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-t-banner bg-white p-5 sm:rounded-banner">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-xl font-extrabold text-estrutura">{titulo}</h2>
-          <button onClick={fechar} aria-label="Fechar" className="text-ink-soft"><Icone n="fechar" /></button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function EditarProduto({ p, fechar, salvo }: { p: ProdutoLinha; fechar: () => void; salvo: (nome: string) => void }) {
-  const [cats, setCats] = useState<Categoria[]>([]);
-  const [erro, setErro] = useState<string | null>(null);
-  const [pendente, setPendente] = useState(false);
-  useEffect(() => { listarCategorias().then(setCats).catch(() => {}); }, []);
-
-  async function enviar(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (pendente) return;
-    setErro(null); setPendente(true);
-    try {
-      const fd = new FormData(e.currentTarget);
-      const r = await atualizarProduto({}, fd);
-      if (r.erro) { setErro(r.erro); return; }
-      salvo(String(fd.get('nome') ?? p.nome));
-    } catch {
-      setErro('Falha ao salvar o produto.');
-    } finally {
-      setPendente(false);
-    }
-  }
-
-  return (
-    <form onSubmit={enviar} className="space-y-3" data-testid="produto-editar-form" noValidate>
-      <input type="hidden" name="id" value={p.id} />
-      <label className={LBL}>Nome *<input name="nome" defaultValue={p.nome} className={CAMPO} data-testid="produto-editar-nome" /></label>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className={LBL}>Preço de venda (R$) *
-          <input name="precoVarejo" inputMode="decimal" defaultValue={p.preco_varejo.toFixed(2).replace('.', ',')} className={CAMPO} data-testid="produto-editar-preco" />
-        </label>
-        <label className={LBL}>Código de barras
-          <input name="codigoBarras" inputMode="numeric" defaultValue={p.codigo_barras ?? ''} className={CAMPO} data-testid="produto-editar-ean" />
-        </label>
-      </div>
-      <label className={LBL}>Categoria
-        <select name="categoriaId" defaultValue={p.categoria_id ?? ''} className={CAMPO}>
-          <option value="">Sem categoria</option>
-          {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-        </select>
-      </label>
-      <div className="flex flex-wrap gap-4 rounded-card bg-fundo px-4 py-3 text-sm font-bold text-estrutura">
-        <label className="flex items-center gap-2"><input type="checkbox" name="adulto" defaultChecked={p.adulto} />+18</label>
-        <label className="flex items-center gap-2"><input type="checkbox" name="fumigeno" defaultChecked={p.fumigeno} />Fumígeno</label>
-        <label className="flex items-center gap-2"><input type="checkbox" name="ativo" defaultChecked={p.ativo} data-testid="produto-editar-ativo" />Ativo (à venda)</label>
-      </div>
-      <p className="text-xs text-ink-soft">Saldo não se edita aqui: entra por compra, transferência ou inventário (estoque auditado).</p>
-      <p role="alert" className="min-h-5 text-sm font-bold text-bad" data-testid="produto-editar-erro">{erro}</p>
-      <div className="grid grid-cols-[auto_1fr] gap-2">
-        <button type="button" onClick={fechar} className="rounded-full border border-line bg-white px-5 py-3 font-bold text-estrutura hover:border-estrutura">Cancelar</button>
-        <button type="submit" disabled={pendente} data-testid="produto-editar-salvar"
-          className="rounded-full bg-acao-600 px-5 py-3 font-extrabold text-white shadow-acao disabled:opacity-50">{pendente ? 'Salvando…' : 'Salvar produto'}</button>
-      </div>
-    </form>
   );
 }

@@ -61,6 +61,13 @@ function sugerirPeloNcm(ncm: string | undefined): Pick<DadosGtin, 'adultoSugerid
   return { adultoSugerido: alcool || fumigeno, fumigenoSugerido: fumigeno };
 }
 
+// "Coca Cola LT 350ml" + "350 ml" → não repete o tamanho que já está no nome
+function comQuantidade(nome: string, qtd: string | undefined): string {
+  if (!qtd) return nome;
+  const so = (t: string) => t.toLowerCase().replace(/[\s.,]/g, '');
+  return so(nome).includes(so(qtd)) ? nome : `${nome} ${qtd}`;
+}
+
 type Cosmos = {
   description?: string;
   brand?: { name?: string };
@@ -111,7 +118,7 @@ export async function consultarGtin(codigo: string): Promise<DadosGtin> {
   if (o?.status === 1 && nome) {
     return {
       fonte: 'openfoodfacts',
-      nome: [nome, o.product?.quantity].filter(Boolean).join(' '),
+      nome: comQuantidade(nome, o.product?.quantity),
       marca: o.product?.brands?.split(',')[0]?.trim(),
       ...lerConteudo(o.product?.quantity ?? nome),
       aviso: token ? undefined : 'Sem NCM/CEST: ative a consulta fiscal (token do Cosmos) para trazer os dados fiscais.',
