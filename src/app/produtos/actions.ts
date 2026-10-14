@@ -109,6 +109,15 @@ export async function criarProdutoRapido(_: EstadoCadastro, form: FormData): Pro
   });
   if (error) return { erro: traduzErro(error.message) };
 
+  // fiscal sugerido pela consulta do código de barras (gtin.ts): NCM 8 e CEST 7 dígitos; inválido é ignorado
+  const ncm = txt('ncm').replace(/\D/g, '');
+  const cest = txt('cest').replace(/\D/g, '');
+  if ((ncm.length === 8 || cest.length === 7) && typeof id === 'string') {
+    await sb.from('produtos').update({
+      ...(ncm.length === 8 ? { ncm } : {}), ...(cest.length === 7 ? { cest } : {}),
+    }).eq('id', id).eq('tenant_id', s.tenantId);
+  }
+
   // devolve o produto no formato que a tela de venda já usa, para entrar na comanda na hora
   const [rProd, rSaldo] = await Promise.all([
     sb.from('produtos')

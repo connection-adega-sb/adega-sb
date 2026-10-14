@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   criarProdutoRapido, listarCategorias, type Categoria, type ProdutoNovo,
 } from '@/app/produtos/actions';
+import { consultarGtin, type DadosGtin } from '@/app/produtos/gtin';
 
 // Modal de cadastro rápido de produto — aberto de QUALQUER módulo de venda no meio da operação
 // (pedido do cliente 2026-10-10). O fluxo é: cadastrar → o chamador já mete o produto na comanda
@@ -46,6 +47,11 @@ export function CadastroRapidoProduto({
   const [saldo, setSaldo] = useState('');
   const [adulto, setAdulto] = useState(false);
   const [fumigeno, setFumigeno] = useState(false);
+  // fiscal (sugerido pela consulta do código de barras; o contador confere antes da NFC-e)
+  const [ncm, setNcm] = useState('');
+  const [cest, setCest] = useState('');
+  const [busca, setBusca] = useState<{ estado: 'buscando' | 'ok' | 'aviso'; texto: string } | null>(null);
+  const ultimoConsultado = useRef('');
   const [erro, setErro] = useState<string | null>(null);
   const [pendente, setPendente] = useState(false);
   const nomeRef = useRef<HTMLInputElement>(null);
@@ -69,6 +75,33 @@ export function CadastroRapidoProduto({
   }, []);
 
   useEffect(() => { nomeRef.current?.focus(); }, []);
+
+  // Código de barras → puxa nome, conteúdo, NCM, CEST e sugere +18/fumígeno (gtin.ts, no servidor).
+  // Só preenche campo VAZIO: nunca apaga o que o operador já digitou.
+  async function puxarDados(codigo: string) {
+    const g = codigo.replace(/\D/g, '');
+    if (g.length < 8 || g === ultimoConsultado.current) return;
+    ultimoConsultado.current = g;
+    setBusca({ estado: 'buscando', texto: 'Buscando dados do produto…' });
+    let d: DadosGtin;
+    try { d = await consultarGtin(g); } catch { setBusca({ estado: 'aviso', texto: 'Sem conexão com a consulta: preencha à mão.' }); return; }
+    if (d.fonte === 'catalogo' || d.fonte === 'nenhuma') { setBusca({ estado: 'aviso', texto: d.aviso ?? 'Não encontrado.' }); return; }
+    if (d.nome) setNome((v) => v || d.nome!);
+    if (d.conteudo && d.conteudoUnidade) {
+      setConteudo((v) => v || String(d.conteudo));
+      setConteudoUn((v) => v || d.conteudoUnidade!);
+    }
+    if (d.ncm) setNcm((v) => v || d.ncm!);
+    if (d.cest) setCest((v) => v || d.cest!);
+    if (d.adultoSugerido) setAdulto(true);
+    if (d.fumigenoSugerido) { setFumigeno(true); setAdulto(true); }
+    const fonte = d.fonte === 'cosmos' ? 'Cosmos (base brasileira de produtos)' : 'Open Food Facts';
+    const fiscal = d.ncm ? ` · NCM ${d.ncm.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1.$2.$3')}${d.cest ? ` · CEST ${d.cest}` : ''}` : '';
+    setBusca({ estado: d.aviso ? 'aviso' : 'ok', texto: `Dados de ${fonte}${d.marca ? ` · ${d.marca}` : ''}${fiscal}. Confira antes de salvar.${d.aviso ? ' ' + d.aviso : ''}` });
+  }
+
+  // leitor no PDV já traz o código: consulta assim que o modal abre
+  useEffect(() => { if (prefill?.codigoBarras) void puxarDados(prefill.codigoBarras); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   async function enviar(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -119,10 +152,17 @@ export function CadastroRapidoProduto({
 
           <label className={LBL}>
             Código de barras
-            <input
-              name="codigoBarras" value={ean} onChange={(e) => setEan(e.target.value)} inputMode="numeric"
-              data-testid="cadastro-ean" placeholder="opcional" className={CAMPO}
-            />
+            <span className="mt-1 flex gap-2">
+              <input
+                name="codigoBarras" value={ean} onChange={(e) => setEan(e.target.value)} inputMode="numeric"
+                onBlur={() => void puxarDados(ean)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void puxarDados(ean); } }}
+                data-testid="cadastro-ean" placeholder="passe o leitor" className={CAMPO.replace('mt-1 ', '')}
+              />
+              <button type="button" onClick={() => { ultimoConsultado.current = ''; void puxarDados(ean); }} data-testid="cadastro-buscar-ean"
+                title="Buscar nome e dados fiscais pelo código"
+                className="shrink-0 rounded-xl border-[1.5px] border-line-input px-3 text-xs font-bold text-estrutura hover:border-estrutura">Buscar</button>
+            </span>
           </label>
 
           <label className={LBL}>
@@ -183,6 +223,28 @@ export function CadastroRapidoProduto({
               <option value="g">g</option>
               <option value="un">un</option>
             </select>
+          </label>
+
+          {busca && (
+            <p data-testid="cadastro-gtin" className={`sm:col-span-2 rounded-xl px-3 py-2 text-xs ${busca.estado === 'ok' ? 'bg-ok/10 text-ok' : busca.estado === 'buscando' ? 'bg-fundo text-ink-soft' : 'bg-acao-100 text-acao-700'}`}>
+              {busca.texto}
+            </p>
+          )}
+
+          <label className={LBL}>
+            NCM (fiscal)
+            <input
+              name="ncm" value={ncm} onChange={(e) => setNcm(e.target.value.replace(/[^\d.]/g, ''))} inputMode="numeric"
+              data-testid="cadastro-ncm" placeholder="8 dígitos (opcional)" className={CAMPO}
+            />
+          </label>
+
+          <label className={LBL}>
+            CEST (fiscal)
+            <input
+              name="cest" value={cest} onChange={(e) => setCest(e.target.value.replace(/[^\d.]/g, ''))} inputMode="numeric"
+              data-testid="cadastro-cest" placeholder="7 dígitos (opcional)" className={CAMPO}
+            />
           </label>
 
           <label className={`${LBL} sm:col-span-2`}>

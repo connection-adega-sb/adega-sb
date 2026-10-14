@@ -1,7 +1,7 @@
 # AGENTS.md — ADEGA SB
 
-> **Doc viva.** Criado em 2026-10-08 · Última atualização: **2026-10-11 02:00** (`0009`: venda no **Crédito** com cliente obrigatório + recebimento + limite · `/produtos` cadastro fora da venda · app instalável (manifest) · `scripts/release-0009.ps1` — PRD-credito-produtos.md).
-> **Status:** Fase 0 CONCLUÍDA · Fase 1 **CONCLUÍDA EM STAGING E PRODUÇÃO** (`https://adega-sb.netlify.app`, branch `main`) · **F3 PDV + catálogo mínimo CONCLUÍDO EM STAGING E PRODUÇÃO** (release 09/10 12:49–13:06, ritual §6) · **Etapa 2 catálogo/estoque (`0004` + `/estoque`) CONCLUÍDA EM STAGING E PRODUÇÃO** (10/10 00:16) · **F4.1 bar — migration `0005` (mesas/comandas/copão) CONCLUÍDA EM STAGING E PRODUÇÃO** (10/10 00:54, ritual §6) · **`0006` (comanda_remover_item) + seed do bar (10 mesas + Caixa #02) + UI `/bar` CONCLUÍDOS EM STAGING E PRODUÇÃO** (10/10 02:30, ritual §6) · **`0007` produto_criar + cadastro rápido no meio da venda + login no módulo do papel CONCLUÍDOS EM STAGING E PRODUÇÃO** (10/10 03:26, ritual §6) · **Layout único ERP** em produção (`d1a4807`, 10/10 22:55) · **`0008` clientes + F4 no PDV CONCLUÍDO EM STAGING E PRODUÇÃO** (`b3ac873`, 11/10 00:25) · **`0009` crédito + `/produtos` + app instalável CONCLUÍDO EM STAGING E PRODUÇÃO** (`ddaebb0`, 11/10 01:26, `scripts/release-0009.ps1` 7/7 — `release-0009.log`).
+> **Doc viva.** Criado em 2026-10-08 · Última atualização: **2026-10-14 14:30** (`0010` base dos cadastros do novo layout · hospedagem no Vercel) (hospedagem Netlify → **Vercel** `https://adega-sb.vercel.app` · impressão do comprovante inteira `05198f5`) (`0009`: venda no **Crédito** com cliente obrigatório + recebimento + limite · `/produtos` cadastro fora da venda · app instalável (manifest) · `scripts/release-0009.ps1` — PRD-credito-produtos.md).
+> **Status:** Fase 0 CONCLUÍDA · Fase 1 **CONCLUÍDA EM STAGING E PRODUÇÃO** (`https://adega-sb.vercel.app`, branch `main` — Vercel desde 13/10; antes Netlify) · **F3 PDV + catálogo mínimo CONCLUÍDO EM STAGING E PRODUÇÃO** (release 09/10 12:49–13:06, ritual §6) · **Etapa 2 catálogo/estoque (`0004` + `/estoque`) CONCLUÍDA EM STAGING E PRODUÇÃO** (10/10 00:16) · **F4.1 bar — migration `0005` (mesas/comandas/copão) CONCLUÍDA EM STAGING E PRODUÇÃO** (10/10 00:54, ritual §6) · **`0006` (comanda_remover_item) + seed do bar (10 mesas + Caixa #02) + UI `/bar` CONCLUÍDOS EM STAGING E PRODUÇÃO** (10/10 02:30, ritual §6) · **`0007` produto_criar + cadastro rápido no meio da venda + login no módulo do papel CONCLUÍDOS EM STAGING E PRODUÇÃO** (10/10 03:26, ritual §6) · **Layout único ERP** em produção (`d1a4807`, 10/10 22:55) · **`0008` clientes + F4 no PDV CONCLUÍDO EM STAGING E PRODUÇÃO** (`b3ac873`, 11/10 00:25) · **`0009` crédito + `/produtos` + app instalável CONCLUÍDO EM STAGING E PRODUÇÃO** (`ddaebb0`, 11/10 01:26, `scripts/release-0009.ps1` 7/7 — `release-0009.log`).
 > Leia também: `F:\Projetos\adega-sb-docs\HANDOFF-IA.md` (documento global de passagem). Toda decisão nova entra aqui **no mesmo commit** da mudança.
 
 ## Regra nº 1 — um passo por vez, com validação
@@ -35,8 +35,8 @@ O desenvolvedor lendo isso tem TDAH. Formate TODAS as respostas para que um cér
 
 | Ambiente | Pasta local | Branch | Banco (Supabase) | Deploy |
 |---|---|---|---|---|
-| **Staging/dev** (onde se trabalha) | `F:\Projetos\adega-sb-staging` | `staging` | `connection-adega-sb-staging` · `rogkczrtcfxurmnjvlwk` | local (`npm run dev`); branch deploy no Netlify a configurar |
-| Produção (só recebe merge) | `F:\Projetos\adega-sb` | `main` | `connection-adega-sb` · `nhnlbptzjjibtmsgvcaw` | **Netlify** `adega-sb` → `https://adega-sb.netlify.app` (deploy automático em push de `main`) |
+| **Staging/dev** (onde se trabalha) | `F:\Projetos\adega-sb-staging` | `staging` | `connection-adega-sb-staging` · `rogkczrtcfxurmnjvlwk` | local (`npm run dev`); sem deploy próprio |
+| Produção (só recebe merge) | `F:\Projetos\adega-sb` | `main` | `connection-adega-sb` · `nhnlbptzjjibtmsgvcaw` | **Vercel** `adega-sb` → `https://adega-sb.vercel.app` (deploy automático em push de `main`) |
 | Documentação | `F:\Projetos\adega-sb-docs` | fora do git | — | — |
 
 Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch padrão **`main`** (produção) · `staging` (trabalho). Em 2026-10-09 03:00 ambas em `818ff3d`.
@@ -45,7 +45,7 @@ Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch padrã
 
 ## Contas e credenciais (sem valores)
 
-1. **Netlify:** time `connection-adega-sb`, projeto `adega-sb` (privado até o fechamento). Variáveis: `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (mesmo valor em todos os contextos — trocar por contexto ao ligar o branch deploy) · `SUPABASE_SECRET_KEY` **secret**, só no contexto Production (chave `netlifyproducao` do Supabase prod).
+1. **Vercel** (desde 13/10/2026): time `connectionadegasb-4411`, projeto `adega-sb`, GitHub App instalado só no repo `adega-sb`, Production Branch `main`. Variáveis (Production): `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` tipo **Config** (o Vercel recusa prefixo `NEXT_PUBLIC_` como Secret) · `SUPABASE_SECRET_KEY` tipo **Secret**. Mudou variável → **Redeploy sem build cache** (as `NEXT_PUBLIC_` entram no build). **Plano:** Hobby proíbe uso comercial → assinar **Pro**. O Netlify foi **apagado** em 14/10 (créditos do plano grátis esgotados em 11/10: deploys `dde602e` e `2811344` ficaram *Skipped*).
 1. **GitHub:** `gh` tem 2 contas: `nuvem-de-papel` (outro projeto) e **`connection-adega-sb`** (ativa desde 09/10 00:22). `gh auth setup-git` já rodado. Identidade git **local** do repo: `Joaquim Mário <joaquimmscoelhoam@gmail.com>`. Antes de `push`, `gh auth status` deve mostrar `connection-adega-sb` ativa (`gh auth switch` troca).
 2. **Supabase CLI:** `npx supabase@latest` (2.120.0), logado em 08/10; projeto vinculado (`link`) = **staging**. O `link` usou o login, sem pedir senha do banco.
 3. **Segredos:** só em `.env.local` (fora do git) e nos painéis. Nomes: `NEXT_PUBLIC_SUPABASE_URL` · `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` · `SUPABASE_SECRET_KEY` (começa com `sb_secret_`; só servidor) · `SUPABASE_DB_URL` (pgTAP via psql). Futuros: `RESEND_API_KEY`, `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`, `IFOOD_CLIENT_ID/SECRET`.
@@ -107,12 +107,12 @@ Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch padrã
 
 ## Produção (no ar desde 2026-10-09 03:30)
 
-1. **URL:** `https://adega-sb.netlify.app` (Netlify, deploy automático em push de `main`). Supabase prod: Site URL e Redirect `https://adega-sb.netlify.app/**`.
+1. **URL:** `https://adega-sb.vercel.app` (Vercel, deploy automático em push de `main`). Supabase prod (Authentication → URL Configuration): Site URL e Redirect `https://adega-sb.vercel.app/**` (o login é por senha no servidor e não usa link de e-mail, mas o Site URL deve apontar para o endereço vivo).
 2. **Banco:** `0001` … `0007` aplicadas (preflight OK nas duas, pgTAP **173/173** nas três bases). Master `joaquimmscoelhoam@gmail.com` criado pela pasta de produção.
-3. **Ritual de release (staging → produção):** validar no staging (type-check, lint, build, e2e) → commit/push `staging` → CI verde → migrations novas em produção (preflight → `link` prod → `db push` → pgTAP → **`link` de volta ao staging**) → na pasta de produção: `git fetch; git merge --ff-only origin/staging; git push origin main` → Netlify publica → smoke test.
+3. **Ritual de release (staging → produção):** validar no staging (type-check, lint, build, e2e) → commit/push `staging` → CI verde → migrations novas em produção (preflight → `link` prod → `db push` → pgTAP → **`link` de volta ao staging**) → na pasta de produção: `git fetch; git merge --ff-only origin/staging; git push origin main` → Vercel publica → smoke test.
 4. **Pegadinha (09/10):** a secret de produção apareceu num print com o "olho" aberto → **rotacionada** (nova `netlifyproducao`, antiga apagada). Regra: nunca clicar no olho de secret; copiar pelo botão.
-5. **Pegadinha (09/10):** o Netlify serve arquivo estático antes da rota do Next — `public/prototipos/index.html` respondia em `/prototipos/`. Nunca criar `index.html` dentro de `public/<rota-do-app>/`.
-6. **Pegadinha:** projeto Netlify "Private" exige login no Netlify (janela anônima vê "This site is private").
+5. **Pegadinha (09/10, Netlify — vale como regra):** o Netlify servia arquivo estático antes da rota do Next — `public/prototipos/index.html` respondia em `/prototipos/`. Nunca criar `index.html` dentro de `public/<rota-do-app>/`.
+6. **Pegadinha (histórica, Netlify):** projeto "Private" exigia login no Netlify. 7. **Pegadinha (11/10):** Netlify grátis = 300 créditos/mês, 15 por deploy de produção → ~20 releases. Esgotou e o site ficou parado em `aaf7217` sem aviso no release. Depois de todo release, conferir o deploy **Ready** no Vercel.
 
 ## Cadastro rápido no meio da venda + login no módulo do papel (2026-10-10 03:26)
 
@@ -155,6 +155,33 @@ Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch padrã
 4. **Testes (executados 11/10 01:21–01:25 pelo script):** pgTAP 0009 **32/32** em staging e produção · gates `A4f`, `A9` (manifest), `B14` → **28/28** · funcional `P37`–`P41` (crédito sem cliente abre o seletor · venda no crédito grava `credito` + cliente e volta ao PIX · `/clientes` em aberto R$ 4,49 → Receber PIX → zera · `/produtos` cadastra fora da venda · caixa não vê Editar) → **41/41** · CI verde em `ddaebb0`.
 5. **Release de ponta a ponta:** `powershell -ExecutionPolicy Bypass -File scripts\release-0009.ps1` (ASCII, PS 5.1): staging (link → preflight → push → pgTAP) → `e2e` → `e2e:pdv` → commit/push `staging` → espera o CI do SHA → produção (link → preflight → push → pgTAP → **link de volta ao staging sempre**) → `merge --ff-only` em `main` → push. Para na primeira falha; tudo em `release-0009.log`.
 6. **Usuário `pdv@adegasb.com.br`:** criado **pelo cliente** em `/admin/usuarios` (papel Caixa, local Loja) — a IA não digita senha de ninguém; a senha escolhida entra na 1ª troca obrigatória (`/conta/senha`, mínimo 10). `rotaInicial('caixa')` → `/pdv`.
+
+## 0010 — base dos cadastros do novo layout (2026-10-14)
+
+1. **Pedido:** aplicar o novo layout (produto, pessoa, empresa emitente) com a estrutura da planilha do sistema antigo (`Planilha1.xlsx`, 1.784 produtos, 38 colunas), a mesma dos 10 novos clientes. Análise e decisões em `adega-sb-docs\PRD-novo-layout-e-importacao.md`.
+2. **Decisões do cliente (14/10 13:50):** estoque da planilha entra **zerado** e depois se faz inventário; **cada cliente com o próprio sistema** (site e banco separados), feito a partir desta base (corrigido pelo cliente às 13:49; `tenants.segmento` só indica o ramo deste sistema); novo layout **só nos 3 cadastros**; cartão do cliente **só bandeira + 4 dígitos**.
+3. **Migration `0010_cadastros_completos.sql`** (só adiciona; nenhuma função antiga muda de assinatura):
+   - `tenants`: segmento (ramo: adega, moda, doceria…), fantasia, IE, regime, contato, endereço, `ambiente_nfce`, `config` jsonb (abas DANFE, Venda, TEF e Outras).
+   - `produtos`: `codigo` legado, fabricante, fornecedor, `unidade_comercial` (UN/CX/PC…; a `unidade` un/kg/l continua sendo a de estoque), `preco_custo`, `estoque_minimo`, `ultimo_reajuste`, `oculto_tabela`, CSOSN, ICMS, base, IPI, CST PIS/Cofins, pesos, IBS/CBS, cClassTrib, GTIN tributável, ANP, observação, foto, `origem_dados` e `revisar` (para o importador).
+   - `clientes`: PF/PJ (`cnpj` único), RG/IE, endereço completo, `telefone_fixo` (o `telefone` segue sendo o celular/WhatsApp do PDV), vendedor, tipo de cliente, bloqueado, referências, `cartao_bandeira` e `cartao_final` (4 dígitos, check no banco).
+   - Funções: `cnpj_valido`; `produto_salvar_ficha`, `cliente_salvar_ficha` e `empresa_salvar` (`p_dados jsonb`). A empresa só é alterada pelo master, e o estoque nunca entra pela ficha.
+4. **Testes:** pgTAP **30/30** (`0010_test.sql`); 0002–0009 continuam verdes no PG16 local; preflight barra reaplicação; rollback testado (rollback → preflight OK → reaplica → 30/30).
+5. **Próximas fases:** L3 importador da planilha → L2 tela de produto → L4 tela de pessoa → L5 tela de empresa. Certificado A1 e CSC ficam na F10 (Vault).
+6. **Release:** `scripts\release-0010.ps1` leva junto a busca por código de barras (GTIN) e os docs/scripts com o endereço do Vercel.
+
+## Hospedagem: Netlify → Vercel + impressão inteira (2026-10-13/14)
+
+1. **Por quê:** os créditos do Netlify grátis acabaram em 11/10 e os deploys `dde602e` e `2811344` ficaram *Skipped*. O site continuou em `aaf7217`, sem CPF e sem impressão, e o cliente achou que a impressão "não abria".
+2. **Como:** projeto Vercel importado do GitHub (`main`), 3 variáveis (ver "Contas e credenciais"), Redeploy. Validado em 13/10 15:21–16:46 com vendas reais do `pdv@`: abrir/fechar caixa ("Caixa confere."), CPF na nota, comprovante, recibo e troco.
+3. **`05198f5` — impressão:** o papel ficava dentro do painel com rolagem e `max-height` da janela, e o Chrome cortava (em A4 saía só o logo). Agora `ReciboVenda` desenha uma cópia (`PapelRecibo copia`) via `createPortal` direto no `<body>` (`.area-impressao`). O `@media print` esconde todo o resto e fixa 76 mm de largura, sem `@page size`, então serve em A4 (Epson L3250) e em bobina de 80 mm. Os testids ficam só na cópia da tela.
+4. **Pendências:** assinar o **Vercel Pro**; Site URL do Supabase prod → Vercel; `COSMOS_TOKEN` vai no Vercel.
+
+## Cadastro pelo código de barras: nome + NCM + CEST automáticos (2026-10-11 04:30)
+
+1. **Pedido:** "colocar o código de barras do produto e puxar dados cadastrais e fiscais automaticamente".
+2. **`src/app/produtos/gtin.ts` (server action `consultarGtin`)**: (1) código já no nosso catálogo → avisa e não duplica; (2) **Bluesoft Cosmos** `GET https://api.cosmos.bluesoft.com.br/gtins/{gtin}.json` com header `X-Cosmos-Token` = **`COSMOS_TOKEN`** (env; só no servidor) → nome, marca, **NCM**, **CEST**; (3) **Open Food Facts** (grátis, sem fiscal) → nome e conteúdo. Timeout 6 s por base.
+3. **Cadastro (`CadastroRapidoProduto`)**: botão **Buscar** ao lado do código + busca automática no Enter/saída do campo e ao abrir com código lido no PDV. Preenche só campo **vazio** (nome, conteúdo/unidade, NCM, CEST) e marca **+18** (NCM 2203–2208) e **fumígeno** (2402/2403). Faixa mostra a fonte. NCM/CEST são **sugestão** — contador confere antes da NFC-e (F10). Gravados em `produtos.ncm`/`produtos.cest` (colunas da 0003) logo após o `produto_criar`.
+4. **Pendente do cliente:** criar conta em cosmos.bluesoft.com.br, gerar o token e gravar `COSMOS_TOKEN` no `.env.local` (staging) e no Vercel (Production, tipo Secret, depois Redeploy). Sem token funciona só a base aberta.
 
 ## "CPF na nota?" + comprovante e recibo no PDV (2026-10-11 04:00)
 
@@ -217,7 +244,7 @@ Repositório: `https://github.com/connection-adega-sb/adega-sb` · branch padrã
 5. **PDV em /prototipos no Netlify:** o Netlify servia `public/prototipos/index.html` no lugar da página `/prototipos` → arquivo renomeado para `pdv.html` (commit de correção). Validar em produção após o merge.
 6. **Símbolo e favicons oficiais** (designer).
 7. **CI**: actions v5 (avisos de 09/10).
-8. ~~Netlify~~ **RESOLVIDA 09/10:** hospedagem = Netlify (Vercel fora da stack). Pendente: branch deploy do `staging` com chaves de staging por contexto.
+8. ~~Netlify~~ **REVISTA 13/10:** hospedagem = **Vercel** (Netlify sem créditos; apagado 14/10). Pendente: assinar Vercel Pro; Preview do `staging` com chaves de staging (opcional).
 9. **Referências não anexadas:** `QA-PROCEDIMENTO-TESTES.md`, `GOVERNANCA-IA-E-DESENVOLVIMENTO.md`.
 10. **Usuário de teste `CaixaTeste`** (`providercyber@gmail.com`) existe no staging — manter só no staging.
 11. ~~**Rotação da `sb_secret_` do staging**~~ — **RESOLVIDA 09/10 15:01–15:05**: cliente gerou nova chave no Supabase (Project Settings → API Keys → **New secret key**, nome `netlifystaging`), salvou em `nova-secret-staging.txt`; a IA trocou no `.env.local` sem ecoar o valor, validou (chamada real: 28 produtos no staging), re-executou `e2e:pdv` **27/27** com a chave nova e apagou o arquivo. Chave antiga (colada no chat em 09/10) morta no painel.
